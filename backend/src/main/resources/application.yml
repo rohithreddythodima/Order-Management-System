@@ -1,0 +1,30 @@
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/restaurant_management;MODE=PostgreSQL;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: 
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:org.h2.Driver}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: ${SPRING_JPA_DATABASE_PLATFORM:org.hibernate.dialect.H2Dialect}
+        format_sql: true
+    show-sql: false
+  sql:
+    init:
+      mode: never
+
+server:
+  port: 8080
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax
+
+logging:
+  level:
+    org.springframework.security: INFO
+    org.hibernate.SQL: INFO
