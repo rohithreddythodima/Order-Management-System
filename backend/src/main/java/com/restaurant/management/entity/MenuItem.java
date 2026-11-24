@@ -30,6 +30,9 @@ public class MenuItem {
     @Column(length = 500)
     private String description;
 
+    @Column(length = 80)
+    private String category;
+
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal price;
 

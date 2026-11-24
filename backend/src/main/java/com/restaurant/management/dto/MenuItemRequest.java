@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 public record MenuItemRequest(
         @NotBlank @Size(max = 120) String name,
         @Size(max = 500) String description,
+        @Size(max = 80) String category,
         @NotNull @DecimalMin(value = "0.01") BigDecimal price,
         @Size(max = 3_000_000) String imageUrl,
         Boolean available

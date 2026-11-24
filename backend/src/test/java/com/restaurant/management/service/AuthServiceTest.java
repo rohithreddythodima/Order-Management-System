@@ -1,23 +1,34 @@
 package com.restaurant.management.service;
 
-import com.restaurant.management.dto.KitchenUserRequest;
+import java.time.LocalDateTime;
+import java.util.Optional;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import static org.mockito.ArgumentMatchers.any;
+import org.mockito.Mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+
 import com.restaurant.management.dto.AuthRequest;
+import com.restaurant.management.dto.KitchenUserRequest;
 import com.restaurant.management.entity.Role;
 import com.restaurant.management.entity.RoleName;
 import com.restaurant.management.entity.User;
 import com.restaurant.management.repository.RoleRepository;
 import com.restaurant.management.repository.UserRepository;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-
-import java.util.Optional;
-
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -33,7 +44,7 @@ class AuthServiceTest {
         AuthService serviceWithEncoder = new AuthService(
                 userRepository, roleRepository, new BCryptPasswordEncoder());
 
-        var result = serviceWithEncoder.createKitchenUser(
+        var result = serviceWithEncoder.registerKitchenUser(
                 new KitchenUserRequest(" line-cook ", "a-very-long-password", "Line Cook"));
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
@@ -68,5 +79,93 @@ class AuthServiceTest {
         assertTrue(saved.isEnabled());
         assertTrue(saved.getRoles().stream().anyMatch(role -> role.getName() == RoleName.ADMIN));
         assertTrue(new BCryptPasswordEncoder().matches("a-very-long-password", saved.getPassword()));
+    }
+
+    @Test
+    void staffSelfRegistrationAllowsKitchenWaiterAndCashierOnly() {
+        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+        AuthService serviceWithEncoder = new AuthService(userRepository, roleRepository, encoder);
+        for (RoleName roleName : Set.of(RoleName.KITCHEN, RoleName.WAITER, RoleName.CASHIER)) {
+            String username = roleName.name().toLowerCase();
+            AuthRequest request = new AuthRequest();
+            request.setUsername(username);
+            request.setPassword("a-very-long-password");
+            request.setConfirmPassword("a-very-long-password");
+            when(userRepository.existsByUsername(username)).thenReturn(false);
+            when(roleRepository.findByName(roleName)).thenReturn(Optional.of(new Role(roleName)));
+            when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+            var result = serviceWithEncoder.registerStaffAccount(request, roleName);
+
+            assertEquals(username, result.getUsername());
+            assertTrue(result.getRoles().contains(roleName.name()));
+        }
+    }
+
+    @Test
+    void staffSelfRegistrationRejectsAdministratorRole() {
+        AuthService serviceWithEncoder = new AuthService(
+                userRepository, roleRepository, new BCryptPasswordEncoder());
+        AuthRequest request = new AuthRequest();
+
+        assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> serviceWithEncoder.registerStaffAccount(request, RoleName.ADMIN));
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void initialAdminCannotBeRegisteredWhenProfilesAlreadyExist() {
+        when(userRepository.count()).thenReturn(1L);
+        AuthService serviceWithEncoder = new AuthService(
+                userRepository, roleRepository, new BCryptPasswordEncoder());
+
+        assertThrows(IllegalStateException.class, () -> serviceWithEncoder.registerFirstAdmin(new AuthRequest()));
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void fifthInvalidPasswordStartsTemporaryLockout() {
+        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+        User user = new User("line-cook", encoder.encode("correct-password"), "Line Cook");
+        user.setRoles(Set.of(new Role(RoleName.KITCHEN)));
+        when(userRepository.findByUsername("line-cook")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        AuthService serviceWithEncoder = new AuthService(userRepository, roleRepository, encoder);
+        AuthRequest invalidRequest = new AuthRequest();
+        invalidRequest.setUsername("line-cook");
+        invalidRequest.setPassword("incorrect-password");
+
+        for (int attempt = 0; attempt < 5; attempt++) {
+            assertThrows(BadCredentialsException.class, () -> serviceWithEncoder.login(invalidRequest));
+        }
+
+        assertEquals(5, user.getFailedLoginAttempts());
+        assertNotNull(user.getLockedUntil());
+        assertTrue(user.getLockedUntil().isAfter(LocalDateTime.now()));
+        assertTrue(user.isEnabled());
+        assertThrows(BadCredentialsException.class, () -> serviceWithEncoder.login(invalidRequest));
+    }
+
+    @Test
+    void expiredLockoutIsClearedAndSuccessfulLoginResetsAttemptCount() {
+        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+        User user = new User("line-cook", encoder.encode("correct-password"), "Line Cook");
+        user.setRoles(Set.of(new Role(RoleName.KITCHEN)));
+        user.setEnabled(false);
+        user.setFailedLoginAttempts(5);
+        user.setLockedUntil(LocalDateTime.now().minusMinutes(1));
+        when(userRepository.findByUsername("line-cook")).thenReturn(Optional.of(user));
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        AuthService serviceWithEncoder = new AuthService(userRepository, roleRepository, encoder);
+        AuthRequest validRequest = new AuthRequest();
+        validRequest.setUsername("line-cook");
+        validRequest.setPassword("correct-password");
+
+        var result = serviceWithEncoder.login(validRequest);
+
+        assertEquals("line-cook", result.getUsername());
+        assertTrue(user.isEnabled());
+        assertEquals(0, user.getFailedLoginAttempts());
+        assertNull(user.getLockedUntil());
     }
 }

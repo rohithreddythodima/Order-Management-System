@@ -1,15 +1,24 @@
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
+import { Armchair, BarChart3, ClipboardList, LayoutDashboard, LogOut, RefreshCw, Users, UtensilsCrossed } from 'lucide-react';
 import { api } from '../api';
-import { DailySales, MenuItem, Order, OrderStatus, SalesReport, UserDto } from '../types';
+import { DailySales, MenuItem, Order, OrderStatus, RestaurantTable, Role, SalesReport, TableStatus, UserDto } from '../types';
 
-type Section = 'overview' | 'orders' | 'menu' | 'reports' | 'staff';
-type MenuForm = { name: string; description: string; price: string; imageUrl: string };
-type KitchenUserForm = { username: string; fullName: string; password: string };
-const emptyMenuForm: MenuForm = { name: '', description: '', price: '', imageUrl: '' };
-const emptyKitchenUserForm: KitchenUserForm = { username: '', fullName: '', password: '' };
+type Section = 'overview' | 'orders' | 'menu' | 'reports' | 'staff' | 'tables';
+type MenuForm = { name: string; description: string; category: string; price: string; imageUrl: string };
+type StaffForm = { id: number | null; username: string; fullName: string; password: string; roles: Role[] };
+const emptyMenuForm: MenuForm = { name: '', description: '', category: '', price: '', imageUrl: '' };
+const emptyStaffForm: StaffForm = { id: null, username: '', fullName: '', password: '', roles: ['KITCHEN'] };
 const statuses: OrderStatus[] = ['NEW', 'PREPARING', 'READY', 'COMPLETED'];
+const sectionIcons: Record<Section, ReactNode> = {
+  overview: <LayoutDashboard size={18} aria-hidden="true" />,
+  orders: <ClipboardList size={18} aria-hidden="true" />,
+  menu: <UtensilsCrossed size={18} aria-hidden="true" />,
+  reports: <BarChart3 size={18} aria-hidden="true" />,
+  staff: <Users size={18} aria-hidden="true" />,
+  tables: <Armchair size={18} aria-hidden="true" />,
+};
 
 const getRoleFromPath = (workspace: string) => {
   switch (workspace) {
@@ -48,19 +57,28 @@ export default function DashboardPage() {
   const [user, setUser] = useState<UserDto | null>(null);
   const [activeSection, setActiveSection] = useState<Section>('overview');
   const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [tables, setTables] = useState<RestaurantTable[]>([]);
+  const [staff, setStaff] = useState<UserDto[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [report, setReport] = useState<SalesReport>(emptyReport);
   const [menuForm, setMenuForm] = useState<MenuForm>(emptyMenuForm);
-  const [kitchenUserForm, setKitchenUserForm] = useState<KitchenUserForm>(emptyKitchenUserForm);
+  const [menuSearch, setMenuSearch] = useState('');
+  const [staffForm, setStaffForm] = useState<StaffForm>(emptyStaffForm);
+  const [tableNumberInput, setTableNumberInput] = useState('');
+  const [tableStatusInput, setTableStatusInput] = useState<TableStatus>('AVAILABLE');
+  const [selectedTableId, setSelectedTableId] = useState('');
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [cart, setCart] = useState<Record<number, number>>({});
   const [customerName, setCustomerName] = useState('');
+  const [billOrder, setBillOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const isAdmin = user?.roles.includes('ADMIN') ?? false;
-  const isKitchen = user?.roles.some((role) => role === 'KITCHEN' || role === 'CHEF') ?? false;
+  const isAdmin = workspace === 'admin' && (user?.roles.includes('ADMIN') ?? false);
+  const isKitchen = workspace === 'kitchen' && (user?.roles.some((role) => role === 'KITCHEN' || role === 'CHEF') ?? false);
+  const isWaiter = workspace === 'waiter' && (user?.roles.includes('WAITER') ?? false);
+  const isCashier = workspace === 'cashier' && (user?.roles.includes('CASHIER') ?? false);
 
   const refreshData = useCallback(async () => {
     if (workspace === 'kitchen') {
@@ -69,12 +87,18 @@ export default function DashboardPage() {
       return;
     }
 
-    const [menuResponse, orderResponse] = await Promise.all([
+    const [menuResponse, orderResponse, tableResponse] = await Promise.all([
       api.get<MenuItem[]>('/menu'),
       api.get<Order[]>('/orders'),
+      api.get<RestaurantTable[]>('/tables'),
     ]);
     setMenu(menuResponse.data);
     setOrders(orderResponse.data);
+    setTables(tableResponse.data);
+    if (workspace === 'admin') {
+      const staffResponse = await api.get<UserDto[]>('/admin/staff');
+      setStaff(staffResponse.data);
+    }
     if (workspace === 'admin' || workspace === 'cashier') {
       const reportResponse = await api.get<SalesReport>('/reports/sales');
       setReport(reportResponse.data);
@@ -108,12 +132,12 @@ export default function DashboardPage() {
         ? ['KITCHEN', 'CHEF']
         : [getRoleFromPath(workspace || 'admin')];
       if (!workspaceRoles.some((role) => parsed.roles.includes(role as UserDto['roles'][number]))) {
-        navigate('/access-denied');
+        navigate('/login?denied=1', { replace: true });
         return;
       }
 
       setUser(parsed);
-      if (workspace === 'kitchen') setActiveSection('orders');
+      if (workspace === 'kitchen' || workspace === 'cashier' || workspace === 'waiter') setActiveSection('orders');
       setLoading(true);
       refreshData()
         .catch((requestError: unknown) => {
@@ -126,6 +150,16 @@ export default function DashboardPage() {
       navigate('/login');
     }
   }, [handleExpiredSession, navigate, refreshData, workspace]);
+
+  useEffect(() => {
+    if (workspace !== 'kitchen') return;
+    const timer = window.setInterval(() => {
+      refreshData().catch((requestError: unknown) => {
+        if (!handleExpiredSession(requestError)) setError(getErrorMessage(requestError, 'Could not refresh the kitchen queue.'));
+      });
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [handleExpiredSession, refreshData, workspace]);
 
   const title = useMemo(() => {
     switch (workspace) {
@@ -166,20 +200,84 @@ export default function DashboardPage() {
     }
   };
 
-  const createKitchenUser = async (event: FormEvent<HTMLFormElement>) => {
+  const saveStaff = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (staffForm.roles.length === 0) {
+      setError('Select at least one role for this staff account.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      const { id, ...staffFields } = staffForm;
+      const payload = { ...staffFields, password: staffForm.password || null };
+      const response = id === null
+        ? await api.post<UserDto>('/admin/staff', payload)
+        : await api.put<UserDto>(`/admin/staff/${id}`, payload);
+      setStaffForm(emptyStaffForm);
+      setNotice(`Staff account "${response.data.username}" ${staffForm.id === null ? 'created' : 'updated'}.`);
+      await refreshData();
+    } catch (requestError: unknown) {
+      if (handleExpiredSession(requestError)) return;
+      setError(getErrorMessage(requestError, 'Could not save this staff account.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteStaff = async (member: UserDto) => {
+    if (!window.confirm(`Delete staff account "${member.username}"?`)) return;
+    setError('');
+    setNotice('');
+    try {
+      await api.delete(`/admin/staff/${member.id}`);
+      setNotice(`Staff account "${member.username}" deleted.`);
+      await refreshData();
+    } catch (requestError: unknown) {
+      if (handleExpiredSession(requestError)) return;
+      setError(getErrorMessage(requestError, 'Could not delete this staff account.'));
+    }
+  };
+
+  const createTable = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
     setError('');
     setNotice('');
     try {
-      const response = await api.post<UserDto>('/admin/kitchen-users', kitchenUserForm);
-      setKitchenUserForm(emptyKitchenUserForm);
-      setNotice(`Kitchen staff account "${response.data.username}" was created. Share its username and password securely.`);
+      await api.post('/tables', { id: Number(tableNumberInput), status: tableStatusInput });
+      setTableNumberInput('');
+      setTableStatusInput('AVAILABLE');
+      setNotice('Table added.');
+      await refreshData();
     } catch (requestError: unknown) {
       if (handleExpiredSession(requestError)) return;
-      setError(getErrorMessage(requestError, 'Could not provision this kitchen staff account.'));
+      setError(getErrorMessage(requestError, 'Could not create this table.'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const updateTableStatus = async (table: RestaurantTable, status: TableStatus) => {
+    try {
+      await api.put(`/tables/${table.id}`, { id: table.id, status });
+      await refreshData();
+    } catch (requestError: unknown) {
+      if (handleExpiredSession(requestError)) return;
+      setError(getErrorMessage(requestError, 'Could not update this table.'));
+    }
+  };
+
+  const deleteTable = async (table: RestaurantTable) => {
+    if (!window.confirm(`Delete table ${table.id}?`)) return;
+    try {
+      await api.delete(`/tables/${table.id}`);
+      setNotice(`Table ${table.id} deleted.`);
+      await refreshData();
+    } catch (requestError: unknown) {
+      if (handleExpiredSession(requestError)) return;
+      setError(getErrorMessage(requestError, 'Could not delete this table.'));
     }
   };
 
@@ -232,15 +330,32 @@ export default function DashboardPage() {
       setError('Add at least one menu item to the order.');
       return;
     }
+    const table = isWaiter ? tables.find((candidate) => candidate.id === Number(selectedTableId)) : undefined;
+    if (isWaiter && !table) {
+      setError('Select an available table or one of your active table orders.');
+      return;
+    }
+    const existingOrder = table?.activeOrderId
+      ? orders.find((order) => order.id === table.activeOrderId && order.waiterUsername === user?.username)
+      : undefined;
+    if (table?.activeOrderId && !existingOrder) {
+      setError('This occupied table is not linked to one of your active orders.');
+      return;
+    }
 
     setSaving(true);
     setError('');
     setNotice('');
     try {
-      await api.post('/orders', { customerName, items });
+      if (existingOrder) {
+        await api.post(`/orders/${existingOrder.id}/items`, { items });
+        setNotice(`Items added to table ${table?.id}'s active order.`);
+      } else {
+        await api.post('/orders', { customerName, items, ...(table ? { tableId: table.id } : {}) });
+        setNotice(table ? `Order created for table ${table.id}.` : 'Order created.');
+      }
       setCart({});
       setCustomerName('');
-      setNotice('Order created.');
       await refreshData();
     } catch (requestError: unknown) {
       if (handleExpiredSession(requestError)) return;
@@ -296,10 +411,11 @@ export default function DashboardPage() {
   const sectionName = activeSection === 'overview'
     ? 'Overview'
     : activeSection === 'menu' ? 'Menu' : activeSection === 'orders' ? (isKitchen ? 'Kitchen orders' : 'Orders')
-      : activeSection === 'staff' ? 'Kitchen staff' : 'Reports';
+      : activeSection === 'staff' ? 'Staff accounts' : activeSection === 'tables' ? 'Tables' : 'Reports';
   const hasSampleOrders = orders.some((order) => order.customerName.startsWith('Sample · '));
   const maxDailyRevenue = Math.max(...report.dailySales.map((day) => day.revenue), 1);
   const totalCart = menu.reduce((sum, item) => sum + item.price * (cart[item.id] ?? 0), 0);
+  const visibleMenu = menu.filter((item) => `${item.name} ${item.category ?? ''}`.toLocaleLowerCase().includes(menuSearch.trim().toLocaleLowerCase()));
 
   if (loading || !user) {
     return <main className="loading-screen">Loading your workspace…</main>;
@@ -307,19 +423,32 @@ export default function DashboardPage() {
 
   const renderOrders = () => (
     <div className="orders-layout">
-      <section className="panel order-builder">
+      {(isAdmin || isWaiter) && <section className="panel order-builder">
         <div className="section-heading">
           <div><p className="eyebrow">New sale</p><h2>Create an order</h2></div>
           <span className="muted">{menu.filter((item) => item.available).length} items available</span>
         </div>
         <form onSubmit={submitOrder}>
+          {isWaiter && <>
+            <label className="field-label" htmlFor="order-table">Table</label>
+            <select id="order-table" required value={selectedTableId} onChange={(event) => setSelectedTableId(event.target.value)}>
+              <option value="">Select a table</option>
+              {tables.map((table) => {
+                const hasOwnOrder = table.activeOrderId !== null && orders.some((order) => order.id === table.activeOrderId && order.waiterUsername === user.username);
+                const disabled = table.status === 'RESERVED' || (table.status === 'OCCUPIED' && !hasOwnOrder);
+                return <option key={table.id} value={table.id} disabled={disabled}>Table {table.id} · {hasOwnOrder ? 'Add to active order' : table.status.toLowerCase()}</option>;
+              })}
+            </select>
+          </>}
           <label className="field-label" htmlFor="customer-name">Customer name <span>(optional)</span></label>
           <input id="customer-name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Walk-in customer" maxLength={120} />
+          <label className="field-label" htmlFor="order-menu-search">Search menu by name or category</label>
+          <input id="order-menu-search" type="search" value={menuSearch} onChange={(event) => setMenuSearch(event.target.value)} placeholder="Search menu" />
           {menu.filter((item) => item.available).length === 0 ? (
             <p className="empty-state">Add an available item in the Menu section to start an order.</p>
           ) : (
             <div className="order-menu-list">
-              {menu.filter((item) => item.available).map((item) => (
+              {visibleMenu.filter((item) => item.available).map((item) => (
                 <div className="order-menu-item" key={item.id}>
                   <img className="item-image item-image-small" src={item.imageUrl || undefined} alt="" />
                   <div className="order-menu-copy"><strong>{item.name}</strong><span>{formatPrice(item.price)}</span></div>
@@ -335,7 +464,7 @@ export default function DashboardPage() {
           <div className="order-total"><span>Order total</span><strong>{formatPrice(totalCart)}</strong></div>
           <button className="primary-button full-width" type="submit" disabled={saving || totalCart === 0}>{saving ? 'Saving…' : 'Place order'}</button>
         </form>
-      </section>
+      </section>}
 
       <section className="panel">
         <div className="section-heading"><div><p className="eyebrow">Live tickets</p><h2>Recent orders</h2></div></div>
@@ -343,14 +472,15 @@ export default function DashboardPage() {
           <div className="order-list">
             {orders.map((order) => (
               <article className="order-card" key={order.id}>
-                <div className="order-card-header"><div><strong>Order #{order.id}</strong><span>{order.customerName}</span></div><strong>{formatPrice(order.total)}</strong></div>
+                <div className="order-card-header"><div><strong>Order #{order.id}{order.tableId ? ` · Table ${order.tableId}` : ''}</strong><span>{order.customerName}{order.waiterUsername ? ` · Waiter ${order.waiterUsername}` : ''}</span></div><strong>{formatPrice(order.total)}</strong></div>
                 <p className="order-items-summary">{order.items.map((item) => `${item.quantity} × ${item.itemName}`).join(' · ')}</p>
                 <div className="order-card-footer"><span>{formatDate(order.createdAt)}</span><div className="row-actions">
-                  {(isAdmin || isKitchen)
+                  {(isAdmin || isKitchen || isCashier)
                     ? <select aria-label={`Status for order ${order.id}`} value={order.status} onChange={(event) => updateOrderStatus(order.id, event.target.value as OrderStatus)}>
-                      {statuses.map((status) => <option value={status} key={status}>{status.replace('_', ' ')}</option>)}
+                      {Array.from(new Set(isCashier ? [order.status, ...(order.status === 'READY' ? ['COMPLETED' as OrderStatus] : [])] : isKitchen ? ['PREPARING', 'READY'] as OrderStatus[] : statuses)).map((status) => <option value={status} key={status}>{status.replace('_', ' ')}</option>)}
                     </select>
                     : <span className={`status-badge status-${order.status.toLowerCase()}`}>{order.status.replace('_', ' ')}</span>}
+                  {isCashier && <button className="text-button" type="button" onClick={() => setBillOrder(order)}>View bill</button>}
                   {isAdmin && <button className="text-button danger" type="button" onClick={() => deleteOrder(order)}>Delete</button>}
                 </div></div>
               </article>
@@ -381,7 +511,7 @@ export default function DashboardPage() {
                   <div className="order-card-header"><div><strong>Order #{order.id}</strong><span>{order.customerName} · {formatDate(order.createdAt)}</span></div><span className={`status-badge status-${order.status.toLowerCase()}`}>{order.status.replace('_', ' ')}</span></div>
                   <ul className="kitchen-items">{order.items.map((item) => <li key={`${order.id}-${item.menuItemId}-${item.itemName}`}><strong>{item.quantity} ×</strong> {item.itemName}</li>)}</ul>
                   {order.status === 'NEW' && <button className="primary-button" type="button" onClick={() => updateOrderStatus(order.id, 'PREPARING')}>Start preparing</button>}
-                  {(order.status === 'PREPARING' || order.status === 'READY') && <button className="primary-button" type="button" onClick={() => updateOrderStatus(order.id, 'COMPLETED')}>Mark completed</button>}
+                  {order.status === 'PREPARING' && <button className="primary-button" type="button" onClick={() => updateOrderStatus(order.id, 'READY')}>Mark ready</button>}
                 </article>
               ))}
             </div>
@@ -391,21 +521,62 @@ export default function DashboardPage() {
     );
   };
 
-  const renderKitchenStaff = () => (
-    <section className="panel staff-panel">
-      <p className="eyebrow">Provision staff access</p>
-      <h2>Create a kitchen staff account</h2>
-      <p className="muted">Set a unique username and a strong password. Passwords are stored as BCrypt hashes.</p>
-      <form className="staff-form stacked-form" onSubmit={createKitchenUser}>
-        <label className="field-label" htmlFor="staff-full-name">Full name <span>(optional)</span></label>
-        <input id="staff-full-name" maxLength={150} value={kitchenUserForm.fullName} onChange={(event) => setKitchenUserForm({ ...kitchenUserForm, fullName: event.target.value })} placeholder="Kitchen team member" />
-        <label className="field-label" htmlFor="staff-username">Username</label>
-        <input id="staff-username" required minLength={3} maxLength={100} autoComplete="off" value={kitchenUserForm.username} onChange={(event) => setKitchenUserForm({ ...kitchenUserForm, username: event.target.value })} />
-        <label className="field-label" htmlFor="staff-password">Password <span>(at least 12 characters)</span></label>
-        <input id="staff-password" type="password" required minLength={12} maxLength={72} autoComplete="new-password" value={kitchenUserForm.password} onChange={(event) => setKitchenUserForm({ ...kitchenUserForm, password: event.target.value })} />
-        <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Creating account…' : 'Create kitchen account'}</button>
-      </form>
-    </section>
+  const renderStaff = () => (
+    <div className="menu-layout">
+      <section className="panel staff-panel">
+        <p className="eyebrow">Staff access</p>
+        <h2>{staffForm.id === null ? 'Create staff account' : `Edit ${staffForm.username}`}</h2>
+        <p className="muted">Select one or more roles. Leave the password blank when editing to keep the current password.</p>
+        <form className="staff-form stacked-form" onSubmit={saveStaff}>
+          <label className="field-label" htmlFor="staff-full-name">Full name <span>(optional)</span></label>
+          <input id="staff-full-name" maxLength={150} value={staffForm.fullName} onChange={(event) => setStaffForm({ ...staffForm, fullName: event.target.value })} />
+          <label className="field-label" htmlFor="staff-username">Username</label>
+          <input id="staff-username" required minLength={3} maxLength={100} autoComplete="off" value={staffForm.username} onChange={(event) => setStaffForm({ ...staffForm, username: event.target.value })} />
+          <label className="field-label" htmlFor="staff-password">Password {staffForm.id === null ? '(required, at least 12 characters)' : '(optional)'}</label>
+          <input id="staff-password" type="password" minLength={staffForm.id === null ? 12 : undefined} maxLength={72} required={staffForm.id === null} autoComplete="new-password" value={staffForm.password} onChange={(event) => setStaffForm({ ...staffForm, password: event.target.value })} />
+          <fieldset className="stacked-form"><legend>Roles</legend>
+            {(['WAITER', 'CASHIER', 'KITCHEN', 'CHEF'] as Role[]).map((role) => <label key={role} className="field-label"><input type="checkbox" checked={staffForm.roles.includes(role)} onChange={(event) => setStaffForm({ ...staffForm, roles: event.target.checked ? [...staffForm.roles, role] : staffForm.roles.filter((item) => item !== role) })} /> {role === 'KITCHEN' ? 'Kitchen' : role === 'CHEF' ? 'Chef' : role[0] + role.slice(1).toLowerCase()}</label>)}
+          </fieldset>
+          <div className="editor-actions">
+            <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : staffForm.id === null ? 'Create account' : 'Save changes'}</button>
+            {staffForm.id !== null && <button className="secondary-button" type="button" onClick={() => setStaffForm(emptyStaffForm)}>Cancel</button>}
+          </div>
+        </form>
+      </section>
+      <section className="panel">
+        <div className="section-heading"><div><p className="eyebrow">Current profiles</p><h2>Staff accounts</h2></div><span className="muted">{staff.length} profiles</span></div>
+        {staff.length === 0 ? <p className="empty-state">No staff accounts have been created.</p> : <div className="order-list">
+          {staff.map((member) => <article className="order-card" key={member.id}>
+            <div className="order-card-header"><div><strong>{member.fullName || member.username}</strong><span>@{member.username} · {member.roles.join(', ')}</span></div><span>{member.enabled ? 'Enabled' : 'Disabled'}</span></div>
+            <div className="row-actions"><button className="text-button" type="button" onClick={() => setStaffForm({ id: member.id, username: member.username, fullName: member.fullName ?? '', password: '', roles: member.roles.filter((role) => role !== 'ADMIN') })}>Edit</button><button className="text-button danger" type="button" onClick={() => deleteStaff(member)}>Delete</button></div>
+          </article>)}
+        </div>}
+      </section>
+    </div>
+  );
+
+  const renderTables = () => (
+    <div className="menu-layout">
+      <section className="panel staff-panel">
+        <p className="eyebrow">Dining areas</p><h2>Add a table</h2>
+        <form className="stacked-form" onSubmit={createTable}>
+          <label className="field-label" htmlFor="table-number">Table number</label>
+          <input id="table-number" type="number" min="1" step="1" required value={tableNumberInput} onChange={(event) => setTableNumberInput(event.target.value)} />
+          <label className="field-label" htmlFor="new-table-status">Initial status</label>
+          <select id="new-table-status" value={tableStatusInput} onChange={(event) => setTableStatusInput(event.target.value as TableStatus)}><option value="AVAILABLE">Available</option><option value="OCCUPIED">Occupied</option><option value="RESERVED">Reserved</option></select>
+          <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Add table'}</button>
+        </form>
+      </section>
+      <section className="panel">
+        <div className="section-heading"><div><p className="eyebrow">Floor status</p><h2>Tables</h2></div><span className="muted">{tables.length} total</span></div>
+        {tables.length === 0 ? <p className="empty-state">No tables have been configured.</p> : <div className="order-list">
+          {tables.map((table) => <article className="order-card" key={table.id}>
+            <div className="order-card-header"><strong>Table {table.id}</strong>{table.activeOrderId && <span>Active order #{table.activeOrderId}</span>}</div>
+            <div className="row-actions"><select aria-label={`Status for table ${table.id}`} disabled={Boolean(table.activeOrderId)} value={table.status} onChange={(event) => updateTableStatus(table, event.target.value as TableStatus)}><option value="AVAILABLE">Available</option><option value="OCCUPIED">Occupied</option><option value="RESERVED">Reserved</option></select><button className="text-button danger" type="button" disabled={Boolean(table.activeOrderId)} onClick={() => deleteTable(table)}>Delete</button></div>
+          </article>)}
+        </div>}
+      </section>
+    </div>
   );
 
   const renderMenu = () => (
@@ -419,6 +590,8 @@ export default function DashboardPage() {
             <input id="item-name" required maxLength={120} value={menuForm.name} onChange={(event) => setMenuForm({ ...menuForm, name: event.target.value })} placeholder="e.g. Garden salad" />
             <label className="field-label" htmlFor="item-description">Description</label>
             <textarea id="item-description" maxLength={500} value={menuForm.description} onChange={(event) => setMenuForm({ ...menuForm, description: event.target.value })} placeholder="A short description" rows={3} />
+            <label className="field-label" htmlFor="item-category">Category <span>(optional)</span></label>
+            <input id="item-category" maxLength={80} value={menuForm.category} onChange={(event) => setMenuForm({ ...menuForm, category: event.target.value })} placeholder="e.g. Mains" />
             <label className="field-label" htmlFor="item-price">Price</label>
             <input id="item-price" type="number" min="0.01" step="0.01" required value={menuForm.price} onChange={(event) => setMenuForm({ ...menuForm, price: event.target.value })} placeholder="0.00" />
             <label className="field-label" htmlFor="item-photo">Photo <span>(optional, max 2 MB)</span></label>
@@ -433,9 +606,11 @@ export default function DashboardPage() {
       )}
       <section className="panel menu-catalog">
         <div className="section-heading"><div><p className="eyebrow">Available products</p><h2>Menu items</h2></div><span className="muted">{menu.length} total</span></div>
+        <label className="field-label" htmlFor="menu-search">Search by item or category</label>
+        <input id="menu-search" type="search" value={menuSearch} onChange={(event) => setMenuSearch(event.target.value)} placeholder="Search menu" />
         {menu.length === 0 ? <p className="empty-state">No menu items yet{isAdmin ? ' — add the first one to get started.' : '.'}</p> : (
           <div className="menu-grid">
-            {menu.map((item) => (
+            {visibleMenu.map((item) => (
               <article className="menu-card" key={item.id}>
                 <img
                   className="item-image"
@@ -445,9 +620,10 @@ export default function DashboardPage() {
                   onError={(event) => { event.currentTarget.style.visibility = 'hidden'; }}
                 />
                 <div className="menu-card-content"><div className="menu-item-heading"><h3>{item.name}</h3><span className={item.available ? 'availability available' : 'availability unavailable'}>{item.available ? 'Available' : 'Unavailable'}</span></div>
+                  {item.category && <p className="eyebrow">{item.category}</p>}
                   {item.description && <p className="muted item-description">{item.description}</p>}
                   <div className="menu-card-footer"><strong>{formatPrice(item.price)}</strong>
-                    {isAdmin && <div className="row-actions"><button className="text-button" type="button" onClick={() => { setEditingItemId(item.id); setMenuForm({ name: item.name, description: item.description ?? '', price: String(item.price), imageUrl: item.imageUrl ?? '' }); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button><button className="text-button danger" type="button" onClick={() => deleteMenuItem(item)}>Delete</button></div>}
+                    {isAdmin && <div className="row-actions"><button className="text-button" type="button" onClick={() => { setEditingItemId(item.id); setMenuForm({ name: item.name, description: item.description ?? '', category: item.category ?? '', price: String(item.price), imageUrl: item.imageUrl ?? '' }); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Edit</button><button className="text-button danger" type="button" onClick={() => deleteMenuItem(item)}>Delete</button></div>}
                   </div>
                 </div>
               </article>
@@ -512,28 +688,60 @@ export default function DashboardPage() {
         <nav className="nav-list" aria-label="Main navigation">
           {(isKitchen ? [
             ['orders', 'Kitchen orders'],
+          ] as [Section, string][] : isCashier && !isAdmin ? [
+            ['orders', 'Order monitoring'],
+            ['reports', 'Billing & reports'],
+          ] as [Section, string][] : isWaiter && !isAdmin ? [
+            ['orders', 'Table orders'],
+            ['menu', 'Menu'],
           ] as [Section, string][] : [
             ['overview', 'Overview'],
             ['orders', 'Orders'],
             ['menu', 'Menu'],
-            ...(isAdmin ? [['staff', 'Kitchen staff'] as [Section, string]] : []),
+            ...(isAdmin ? [['staff', 'Staff accounts'] as [Section, string], ['tables', 'Tables'] as [Section, string]] : []),
             ...((isAdmin || user.roles.includes('CASHIER')) ? [['reports', 'Reports'] as [Section, string]] : []),
           ] as [Section, string][]).map(([section, label]) => (
-            <button key={section} className={`nav-item ${activeSection === section ? 'active' : ''}`} onClick={() => { setActiveSection(section); setError(''); setNotice(''); }}>{label}</button>
+            <button
+              key={section}
+              type="button"
+              className={`nav-item ${activeSection === section ? 'active' : ''}`}
+              aria-current={activeSection === section ? 'page' : undefined}
+              onClick={() => { setActiveSection(section); setError(''); setNotice(''); }}
+            >
+              {sectionIcons[section]}<span>{label}</span>
+            </button>
           ))}
         </nav>
-        <div className="sidebar-footer"><div className="sidebar-user"><div className="user-avatar">{(user.fullName || user.username).charAt(0).toUpperCase()}</div><div><strong>{user.fullName || user.username}</strong><span>{user.roles[0]?.toLowerCase()}</span></div></div><button className="logout-button" onClick={logout}>Log out</button></div>
+        <div className="sidebar-footer">
+          <div className="sidebar-user">
+            <div className="user-avatar">{(user.fullName || user.username).charAt(0).toUpperCase()}</div>
+            <div><strong>{user.fullName || user.username}</strong><span>{user.roles.map((role) => role.toLowerCase()).join(' · ')}</span></div>
+          </div>
+          <button className="logout-button" type="button" onClick={logout}><LogOut size={16} aria-hidden="true" /><span>Log out</span></button>
+        </div>
       </aside>
 
       <main className="content-shell">
-        <header className="topbar"><div><p className="eyebrow">{title}</p><h1>{sectionName}</h1></div><button className="secondary-button refresh-button" type="button" onClick={() => { setError(''); refreshData().catch((requestError: unknown) => { if (!handleExpiredSession(requestError)) setError(getErrorMessage(requestError, 'Could not refresh data.')); }); }}>Refresh data</button></header>
+        <header className="topbar">
+          <div><p className="eyebrow">{title}</p><h1>{sectionName}</h1><p className="workspace-greeting">Welcome back, {user.fullName || user.username}</p></div>
+          <button className="secondary-button refresh-button" type="button" onClick={() => { setError(''); refreshData().catch((requestError: unknown) => { if (!handleExpiredSession(requestError)) setError(getErrorMessage(requestError, 'Could not refresh data.')); }); }}><RefreshCw size={16} aria-hidden="true" /> Refresh data</button>
+        </header>
         {error && <div className="alert-error" role="alert">{error}</div>}
         {notice && <div className="alert-success" role="status">{notice}</div>}
         {!isKitchen && activeSection === 'overview' && renderOverview()}
         {activeSection === 'orders' && (isKitchen ? renderKitchenOrders() : renderOrders())}
-        {!isKitchen && activeSection === 'menu' && renderMenu()}
-        {!isKitchen && isAdmin && activeSection === 'staff' && renderKitchenStaff()}
+        {!isKitchen && !isCashier && activeSection === 'menu' && renderMenu()}
+        {!isKitchen && isAdmin && activeSection === 'staff' && renderStaff()}
+        {!isKitchen && isAdmin && activeSection === 'tables' && renderTables()}
         {!isKitchen && (isAdmin || user.roles.includes('CASHIER')) && activeSection === 'reports' && renderReports()}
+        {billOrder && <section className="panel" role="dialog" aria-modal="true" aria-labelledby="bill-title">
+          <div className="section-heading"><div><p className="eyebrow">Billing</p><h2 id="bill-title">Bill for order #{billOrder.id}</h2></div><button className="text-button" type="button" onClick={() => setBillOrder(null)}>Close</button></div>
+          <p>{billOrder.customerName}{billOrder.tableId ? ` · Table ${billOrder.tableId}` : ''} · {formatDate(billOrder.createdAt)}</p>
+          <div className="table-scroll"><table className="data-table"><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Line total</th></tr></thead><tbody>
+            {billOrder.items.map((item) => <tr key={`${billOrder.id}-${item.menuItemId}`}><td>{item.itemName}</td><td>{item.quantity}</td><td>{formatPrice(item.unitPrice)}</td><td>{formatPrice(item.lineTotal)}</td></tr>)}
+          </tbody><tfoot><tr><th colSpan={3}>Total</th><th>{formatPrice(billOrder.total)}</th></tr></tfoot></table></div>
+          <button className="primary-button" type="button" onClick={() => window.print()}>Print bill</button>
+        </section>}
       </main>
     </div>
   );

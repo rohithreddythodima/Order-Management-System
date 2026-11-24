@@ -4,6 +4,7 @@ import com.restaurant.management.dto.AuthRequest;
 import com.restaurant.management.dto.AuthResponse;
 import com.restaurant.management.dto.KitchenUserRequest;
 import com.restaurant.management.dto.UserDto;
+import com.restaurant.management.entity.RoleName;
 import com.restaurant.management.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -15,7 +16,12 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -23,6 +29,11 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
     private final AuthService authService;
     private final AuthenticationManager authenticationManager;
+
+    @GetMapping("/setup-status")
+    public ResponseEntity<java.util.Map<String, Boolean>> setupStatus() {
+        return ResponseEntity.ok(java.util.Map.of("required", authService.isInitialSetupRequired()));
+    }
 
     @PostMapping("/setup-admin")
     public ResponseEntity<AuthResponse> setupAdmin(@Valid @RequestBody AuthRequest request) {
@@ -45,6 +56,14 @@ public class AuthController {
                 .body(new AuthResponse("Kitchen staff account created successfully", user));
     }
 
+    @PostMapping("/register-staff/{role}")
+    public ResponseEntity<AuthResponse> registerStaff(@PathVariable RoleName role,
+                                                       @Valid @RequestBody AuthRequest request) {
+        UserDto user = authService.registerStaffAccount(request, role);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new AuthResponse("Staff account created successfully", user));
+    }
+
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthRequest request,
                                             HttpServletRequest httpRequest) {
@@ -58,7 +77,7 @@ public class AuthController {
             return ResponseEntity.ok(new AuthResponse("Login successful", user));
         } catch (BadCredentialsException ex) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new AuthResponse("Invalid username or password", null));
+                    .body(new AuthResponse(ex.getMessage(), null));
         }
     }
 

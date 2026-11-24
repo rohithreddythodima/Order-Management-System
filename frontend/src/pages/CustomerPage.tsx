@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ArrowDown, ArrowRight, Search, ShoppingBag } from 'lucide-react';
 import { api } from '../api';
 import { MenuItem, Order, TrackedOrder } from '../types';
 
@@ -14,6 +15,7 @@ export default function CustomerPage() {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [cart, setCart] = useState<Record<number, number>>({});
   const [customerName, setCustomerName] = useState('');
+  const [menuSearch, setMenuSearch] = useState('');
   const [trackingCode, setTrackingCode] = useState('');
   const [trackedOrders, setTrackedOrders] = useState<SavedTracking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,31 +131,62 @@ export default function CustomerPage() {
 
   const refreshOrders = () => refreshTrackedOrders(trackedOrders);
   const availableMenu = menu.filter((item) => item.available);
+  const searchTerm = menuSearch.trim().toLocaleLowerCase();
+  const visibleMenu = availableMenu.filter((item) =>
+    `${item.name} ${item.category ?? ''}`.toLocaleLowerCase().includes(searchTerm),
+  );
+  const itemCount = Object.values(cart).reduce((count, quantity) => count + quantity, 0);
 
   return (
     <div className="customer-shell">
       <header className="customer-header">
-        <div className="brand-header"><div className="brand-mark">O</div><div><h1>Order Desk</h1><p className="muted">Browse the menu and order online</p></div></div>
-        <Link to="/login" className="secondary-button">Staff sign in</Link>
+        <Link to="/customer" className="brand-header customer-brand" aria-label="Order Desk home">
+          <div className="brand-mark" aria-hidden="true">O</div>
+          <div><h1>Order Desk</h1><p className="muted">A good meal, made easy</p></div>
+        </Link>
+        <Link to="/login" className="secondary-button staff-link">Staff sign in <ArrowRight size={16} aria-hidden="true" /></Link>
       </header>
       <main className="customer-content">
         {error && <div className="alert-error" role="alert">{error}</div>}
         {notice && <div className="alert-success" role="status">{notice}</div>}
         {loading ? <p className="loading-screen">Loading menu…</p> : (
           <>
-            <section className="panel customer-menu-panel">
-              <div className="section-heading"><div><p className="eyebrow">Fresh from our kitchen</p><h2>Menu</h2></div><span className="muted">{availableMenu.length} items available</span></div>
+            <section className="customer-hero" aria-labelledby="customer-hero-title">
+              <div className="customer-hero-copy">
+                <span className="hero-kicker">GOOD FOOD, GOOD MOOD</span>
+                <h2 id="customer-hero-title">A little taste of Canada.</h2>
+                <p>Comfort-food favorites, freshly made and ready when you are.</p>
+                <a className="hero-cta" href="#menu">Explore the menu <ArrowDown size={16} aria-hidden="true" /></a>
+              </div>
+              <div className="customer-hero-photo">
+                <img src="/images/poutine.jpg" alt="A serving of Canadian poutine" />
+                <span className="hero-photo-caption">Made fresh. Served with care.</span>
+              </div>
+            </section>
+
+            <section className="panel customer-menu-panel" id="menu">
+              <div className="section-heading">
+                <div><p className="eyebrow">Fresh from our kitchen</p><h2>Find your new favorite</h2></div>
+                <span className="availability-count">{availableMenu.length} {availableMenu.length === 1 ? 'item' : 'items'} available</span>
+              </div>
               {availableMenu.length === 0 ? <p className="empty-state">The menu is being updated. Please check back soon.</p> : (
                 <form onSubmit={submitOrder}>
-                  <div className="menu-grid">
-                    {availableMenu.map((item) => (
+                  <label className="customer-search">
+                    <Search size={18} aria-hidden="true" />
+                    <span className="visually-hidden">Search menu by item or category</span>
+                    <input type="search" value={menuSearch} onChange={(event) => setMenuSearch(event.target.value)} placeholder="Search dishes or categories" />
+                    {menuSearch && <button className="clear-search" type="button" onClick={() => setMenuSearch('')}>Clear</button>}
+                  </label>
+                  {visibleMenu.length === 0 ? <p className="empty-state search-empty">No dishes match “{menuSearch}”. Try another search.</p> : <div className="menu-grid">
+                    {visibleMenu.map((item) => (
                       <article className="menu-card" key={item.id}>
-                        {item.imageUrl && <img className="item-image" src={item.imageUrl} alt={item.name} />}
+                        {item.imageUrl ? <img className="item-image" src={item.imageUrl} alt={item.name} loading="lazy" /> : <div className="item-image image-placeholder" aria-hidden="true"><ShoppingBag size={26} /></div>}
                         <div className="menu-card-content">
+                          {item.category && <span className="menu-category">{item.category}</span>}
                           <div className="menu-item-heading"><h3>{item.name}</h3><strong>{formatPrice(item.price)}</strong></div>
                           {item.description && <p className="muted item-description">{item.description}</p>}
                           <div className="customer-item-controls">
-                            <span>Quantity</span>
+                            <span>{cart[item.id] ? `${cart[item.id]} in your order` : 'Add to order'}</span>
                             <div className="quantity-control">
                               <button type="button" aria-label={`Remove one ${item.name}`} onClick={() => changeQuantity(item.id, -1)}>−</button>
                               <span>{cart[item.id] ?? 0}</span>
@@ -163,19 +196,27 @@ export default function CustomerPage() {
                         </div>
                       </article>
                     ))}
-                  </div>
+                  </div>}
                   <div className="customer-order-submit">
-                    <label className="field-label" htmlFor="customer-name">Name for the order <span>(optional)</span></label>
-                    <input id="customer-name" maxLength={120} value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Walk-in customer" />
-                    <div className="order-total"><span>Order total</span><strong>{formatPrice(total)}</strong></div>
-                    <button className="primary-button full-width" type="submit" disabled={saving || total === 0}>{saving ? 'Placing order…' : 'Place order'}</button>
+                    <div className="cart-summary">
+                      <span className="cart-summary-icon"><ShoppingBag size={19} aria-hidden="true" /></span>
+                      <span className="cart-summary-copy"><strong>{itemCount} {itemCount === 1 ? 'item' : 'items'} in your order</strong><small>{itemCount ? 'Ready when you are' : 'Add a dish to get started'}</small></span>
+                      <strong className="cart-summary-total">{formatPrice(total)}</strong>
+                    </div>
+                    <div className="customer-checkout-row">
+                      <label className="visually-hidden" htmlFor="customer-name">Name for the order, optional</label>
+                      <input id="customer-name" maxLength={120} value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Name for your order (optional)" />
+                      <button className="primary-button checkout-button" type="submit" disabled={saving || total === 0}>
+                        {saving ? 'Placing order…' : <>Place order <ArrowRight size={17} aria-hidden="true" /></>}
+                      </button>
+                    </div>
                   </div>
                 </form>
               )}
             </section>
 
             <section className="panel tracking-panel">
-              <div className="section-heading"><div><p className="eyebrow">Order updates</p><h2>Track an order</h2></div><button className="secondary-button" type="button" onClick={refreshOrders}>Refresh status</button></div>
+              <div className="section-heading"><div><p className="eyebrow">Order updates</p><h2>Track your order</h2><p className="muted tracking-hint">Your order status updates automatically.</p></div><button className="secondary-button" type="button" onClick={refreshOrders}>Refresh status</button></div>
               <form className="tracking-form" onSubmit={addTrackingCode}>
                 <input aria-label="Order tracking code" value={trackingCode} onChange={(event) => setTrackingCode(event.target.value)} placeholder="Enter your order tracking code" />
                 <button className="secondary-button" type="submit">Track order</button>

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -26,8 +27,8 @@ public class MenuController {
     private final MenuService menuService;
 
     @GetMapping
-    public List<MenuItemDto> getMenu() {
-        return menuService.getMenu();
+    public List<MenuItemDto> getMenu(@RequestParam(required = false) String search) {
+        return menuService.getMenu(search);
     }
 
     @PostMapping

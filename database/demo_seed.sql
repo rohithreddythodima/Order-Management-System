@@ -51,11 +51,64 @@ BEGIN
         ('Bannock Taco', 'Fresh bannock topped with spiced beans and crisp slaw.', 14.00::NUMERIC(10, 2), '/images/bannock-taco.jpg'),
         ('Maple Pecan Pancakes', 'Fluffy pancakes with toasted pecans and maple syrup.', 13.50::NUMERIC(10, 2), '/images/maple-pancakes.jpg'),
         ('Canadian Cheddar Burger', 'Grilled beef, aged cheddar, lettuce, and house sauce.', 19.00::NUMERIC(10, 2), '/images/cheddar-burger.jpg'),
-        ('Blueberry Grunt', 'Warm wild blueberry cobbler with vanilla cream.', 8.00::NUMERIC(10, 2), '/images/blueberry-grunt.jpg')
+        ('Blueberry Grunt', 'Warm wild blueberry cobbler with vanilla cream.', 8.00::NUMERIC(10, 2), '/images/blueberry-grunt.jpg'),
+        ('Crispy Fish and Chips', 'Beer-battered haddock with fries and house tartar sauce.', 18.50::NUMERIC(10, 2), '/images/fish-and-chips.jpg'),
+        ('Creamy Split Pea Soup', 'Slow-simmered split peas with herbs and toasted bread.', 9.00::NUMERIC(10, 2), '/images/pea-soup.jpg'),
+        ('Canadian Apple Pie', 'Warm apple pie with cinnamon and vanilla cream.', 8.50::NUMERIC(10, 2), '/images/canadian-apple-pie.jpg'),
+        ('Wild Berry Cheesecake', 'Creamy cheesecake topped with seasonal berries.', 9.50::NUMERIC(10, 2), '/images/berry-cheesecake.jpg'),
+        ('Sugar Shack Donuts', 'Freshly fried dough tossed in maple sugar.', 7.00::NUMERIC(10, 2), '/images/sugar-donuts.jpg'),
+        ('Roasted Tomato Soup', 'Roasted tomatoes blended with basil and cream.', 8.50::NUMERIC(10, 2), '/images/pea-soup.jpg'),
+        ('Crispy Cauliflower Bites', 'Golden cauliflower with smoky paprika dip.', 10.00::NUMERIC(10, 2), '/images/fish-and-chips.jpg'),
+        ('Butternut Squash Risotto', 'Creamy arborio rice with roasted squash and sage.', 17.50::NUMERIC(10, 2), '/images/pea-soup.jpg'),
+        ('Grilled Chicken Sandwich', 'Herb chicken, crisp lettuce, and garlic aioli on a bun.', 16.00::NUMERIC(10, 2), '/images/peameal-sandwich.jpg'),
+        ('Maple BBQ Chicken Wings', 'Chicken wings glazed with tangy maple barbecue sauce.', 14.50::NUMERIC(10, 2), '/images/cheddar-burger.jpg'),
+        ('Loaded Cheese Fries', 'Crispy fries topped with cheddar, scallions, and sour cream.', 11.00::NUMERIC(10, 2), '/images/poutine.jpg'),
+        ('Wild Mushroom Flatbread', 'Roasted mushrooms, mozzarella, and fresh thyme.', 15.50::NUMERIC(10, 2), '/images/tourtiere.jpg'),
+        ('Beef and Barley Stew', 'Slow-braised beef with barley and root vegetables.', 18.00::NUMERIC(10, 2), '/images/pea-soup.jpg'),
+        ('Maple Glazed Carrots', 'Roasted carrots finished with maple and fresh parsley.', 8.00::NUMERIC(10, 2), '/images/maple-salmon.jpg'),
+        ('Crispy Onion Rings', 'Hand-breaded onion rings with house dipping sauce.', 9.00::NUMERIC(10, 2), '/images/fish-and-chips.jpg'),
+        ('Chocolate Fudge Brownie', 'Rich chocolate brownie served with vanilla cream.', 8.00::NUMERIC(10, 2), '/images/nanaimo-bar.jpg'),
+        ('Lemon Blueberry Tart', 'Buttery tart filled with lemon custard and blueberries.', 8.50::NUMERIC(10, 2), '/images/blueberry-grunt.jpg'),
+        ('Vanilla Bean Pudding', 'Silky vanilla pudding with a crisp sugar top.', 7.00::NUMERIC(10, 2), '/images/berry-cheesecake.jpg'),
+        ('Maple Cream Milkshake', 'Vanilla ice cream blended with Canadian maple syrup.', 7.50::NUMERIC(10, 2), '/images/sugar-donuts.jpg'),
+        ('Fresh Berry Lemonade', 'House lemonade shaken with seasonal berries.', 5.50::NUMERIC(10, 2), '/images/blueberry-grunt.jpg'),
+        ('Coffee and Butter Tart', 'Freshly brewed coffee paired with a classic butter tart.', 9.00::NUMERIC(10, 2), '/images/butter-tart.jpg')
     ) AS sample(name, description, price, image_url)
     WHERE NOT EXISTS (
         SELECT 1 FROM menu_items existing WHERE existing.name = sample.name
     );
+
+    UPDATE menu_items
+    SET image_url = CASE name
+        WHEN 'Roasted Tomato Soup' THEN '/images/pea-soup.jpg'
+        WHEN 'Crispy Cauliflower Bites' THEN '/images/fish-and-chips.jpg'
+        WHEN 'Butternut Squash Risotto' THEN '/images/pea-soup.jpg'
+        WHEN 'Grilled Chicken Sandwich' THEN '/images/peameal-sandwich.jpg'
+        WHEN 'Maple BBQ Chicken Wings' THEN '/images/cheddar-burger.jpg'
+        WHEN 'Loaded Cheese Fries' THEN '/images/poutine.jpg'
+        WHEN 'Wild Mushroom Flatbread' THEN '/images/tourtiere.jpg'
+        WHEN 'Beef and Barley Stew' THEN '/images/pea-soup.jpg'
+        WHEN 'Maple Glazed Carrots' THEN '/images/maple-salmon.jpg'
+        WHEN 'Crispy Onion Rings' THEN '/images/fish-and-chips.jpg'
+        WHEN 'Chocolate Fudge Brownie' THEN '/images/nanaimo-bar.jpg'
+        WHEN 'Lemon Blueberry Tart' THEN '/images/blueberry-grunt.jpg'
+        WHEN 'Vanilla Bean Pudding' THEN '/images/berry-cheesecake.jpg'
+        WHEN 'Maple Cream Milkshake' THEN '/images/sugar-donuts.jpg'
+        WHEN 'Fresh Berry Lemonade' THEN '/images/blueberry-grunt.jpg'
+        WHEN 'Coffee and Butter Tart' THEN '/images/butter-tart.jpg'
+    END
+    WHERE name IN (
+        'Roasted Tomato Soup', 'Crispy Cauliflower Bites', 'Butternut Squash Risotto',
+        'Grilled Chicken Sandwich', 'Maple BBQ Chicken Wings', 'Loaded Cheese Fries',
+        'Wild Mushroom Flatbread', 'Beef and Barley Stew', 'Maple Glazed Carrots',
+        'Crispy Onion Rings', 'Chocolate Fudge Brownie', 'Lemon Blueberry Tart',
+                'Vanilla Bean Pudding', 'Maple Cream Milkshake', 'Fresh Berry Lemonade',
+                'Coffee and Butter Tart'
+    )
+      AND image_url IS NULL;
+
+        DELETE FROM menu_items
+        WHERE name IN ('Baked Mac and Cheese', 'Garden Harvest Salad');
 
     UPDATE menu_items
     SET image_url = CASE name

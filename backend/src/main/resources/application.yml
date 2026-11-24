@@ -5,6 +5,7 @@ spring:
     password: 
     driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:org.h2.Driver}
   jpa:
+    defer-datasource-initialization: true
     hibernate:
       ddl-auto: update
     properties:
@@ -14,7 +15,7 @@ spring:
     show-sql: false
   sql:
     init:
-      mode: never
+      mode: always
 
 server:
   port: 8080

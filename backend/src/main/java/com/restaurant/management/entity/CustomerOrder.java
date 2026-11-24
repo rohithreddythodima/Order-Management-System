@@ -9,6 +9,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.Getter;
@@ -42,6 +44,20 @@ public class CustomerOrder {
 
     @Column(name = "tracking_code", unique = true, length = 36)
     private String trackingCode;
+
+    @ManyToOne(fetch = jakarta.persistence.FetchType.LAZY)
+    @JoinColumn(name = "table_id")
+    private RestaurantTable restaurantTable;
+
+    @Column(name = "table_number")
+    private Long tableNumber;
+
+    @ManyToOne(fetch = jakarta.persistence.FetchType.LAZY)
+    @JoinColumn(name = "created_by_user_id")
+    private User createdBy;
+
+    @Column(name = "created_by_username", length = 100)
+    private String createdByUsername;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

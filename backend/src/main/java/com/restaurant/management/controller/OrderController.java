@@ -2,6 +2,7 @@ package com.restaurant.management.controller;
 
 import com.restaurant.management.dto.OrderDto;
 import com.restaurant.management.dto.OrderRequest;
+import com.restaurant.management.dto.OrderItemsRequest;
 import com.restaurant.management.dto.OrderStatusRequest;
 import com.restaurant.management.dto.OrderTrackingDto;
 import com.restaurant.management.service.OrderService;
@@ -42,19 +43,37 @@ public class OrderController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public OrderDto create(@Valid @RequestBody OrderRequest request) {
-        return orderService.create(request);
+    public OrderDto create(@Valid @RequestBody OrderRequest request, Authentication authentication) {
+        String username = authentication == null || !authentication.isAuthenticated()
+                || "anonymousUser".equals(authentication.getName()) ? null : authentication.getName();
+        return orderService.create(request, username);
+    }
+
+    @PostMapping("/{id}/items")
+    @PreAuthorize("hasRole('WAITER')")
+    public OrderDto addItems(@PathVariable long id, @Valid @RequestBody OrderItemsRequest request,
+                             Authentication authentication) {
+        return orderService.addItems(id, request, authentication.getName());
     }
 
     @PatchMapping("/{id}/status")
-    @PreAuthorize("hasAnyRole('ADMIN', 'KITCHEN', 'CHEF')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'KITCHEN', 'CHEF', 'CASHIER')")
     public OrderDto updateStatus(@PathVariable long id, @Valid @RequestBody OrderStatusRequest request,
                                  Authentication authentication) {
         boolean isAdmin = authentication.getAuthorities().stream()
                 .anyMatch(authority -> authority.getAuthority().equals("ROLE_ADMIN"));
-        if (!isAdmin && request.status() != com.restaurant.management.entity.OrderStatus.PREPARING
-                && request.status() != com.restaurant.management.entity.OrderStatus.COMPLETED) {
-            throw new AccessDeniedException("Kitchen staff may only set orders to preparing or completed");
+        boolean isKitchen = authentication.getAuthorities().stream()
+            .anyMatch(authority -> authority.getAuthority().equals("ROLE_KITCHEN")
+                || authority.getAuthority().equals("ROLE_CHEF"));
+        boolean isCashier = authentication.getAuthorities().stream()
+            .anyMatch(authority -> authority.getAuthority().equals("ROLE_CASHIER"));
+        boolean kitchenTransitionAllowed = isKitchen
+                && (request.status() == com.restaurant.management.entity.OrderStatus.PREPARING
+                || request.status() == com.restaurant.management.entity.OrderStatus.READY);
+        boolean cashierTransitionAllowed = isCashier
+                && request.status() == com.restaurant.management.entity.OrderStatus.COMPLETED;
+        if (!isAdmin && !kitchenTransitionAllowed && !cashierTransitionAllowed) {
+            throw new AccessDeniedException("This role cannot set the order to that status");
         }
         return orderService.updateStatus(id, request);
     }

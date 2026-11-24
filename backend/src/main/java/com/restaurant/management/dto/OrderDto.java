@@ -13,6 +13,8 @@ public record OrderDto(
         BigDecimal total,
         LocalDateTime createdAt,
         List<OrderLineItemDto> items,
-        String trackingCode
+        String trackingCode,
+        Long tableId,
+        String waiterUsername
 ) {
 }

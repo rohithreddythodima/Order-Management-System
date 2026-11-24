@@ -1,6 +1,5 @@
 package com.restaurant.management.config;
 
-import com.restaurant.management.entity.User;
 import com.restaurant.management.repository.UserRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -34,7 +33,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/setup-admin",
                                 "/api/auth/register-admin",
-                                "/api/auth/register-kitchen",
+                                "/api/auth/register-staff/**",
+                                "/api/auth/setup-status",
                                 "/api/auth/login",
                                 "/error",
                                 "/actuator/health",
@@ -45,8 +45,15 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/orders").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/orders/track/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/tables/**")
+                        .hasAnyRole("ADMIN", "WAITER", "CASHIER")
+                        .requestMatchers("/api/tables/**").hasRole("ADMIN")
+                        .requestMatchers("/api/admin/dashboard").hasRole("ADMIN")
+                        .requestMatchers("/api/waiter/dashboard").hasRole("WAITER")
+                        .requestMatchers("/api/kitchen/dashboard").hasAnyRole("KITCHEN", "CHEF")
+                        .requestMatchers("/api/cashier/dashboard").hasRole("CASHIER")
                         .requestMatchers(HttpMethod.PATCH, "/api/orders/*/status")
-                        .hasAnyRole("ADMIN", "KITCHEN", "CHEF")
+                        .hasAnyRole("ADMIN", "KITCHEN", "CHEF", "CASHIER")
                         .requestMatchers(HttpMethod.DELETE, "/api/orders/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/orders")
                         .hasAnyRole("ADMIN", "KITCHEN", "CHEF", "WAITER", "CASHIER")
@@ -86,8 +93,7 @@ public class SecurityConfig {
     @Bean
     public AuthenticationProvider authenticationProvider(UserDetailsService userDetailsService,
                                                            PasswordEncoder passwordEncoder) {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-        provider.setUserDetailsService(userDetailsService);
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService);
         provider.setPasswordEncoder(passwordEncoder);
         return provider;
     }

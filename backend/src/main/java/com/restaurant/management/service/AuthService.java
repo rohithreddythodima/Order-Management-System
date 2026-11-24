@@ -38,7 +38,42 @@ public class AuthService {
 
     @Transactional
     public UserDto registerAdmin(AuthRequest request) {
-        return createAdmin(request);
+        return registerFirstAdmin(request);
+    }
+
+    @Transactional
+    public UserDto registerStaffAccount(AuthRequest request, RoleName roleName) {
+        if (roleName != RoleName.KITCHEN && roleName != RoleName.WAITER && roleName != RoleName.CASHIER) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Self-registration is not available for this role");
+        }
+        String password = request.getPassword();
+        if (password == null || password.length() < 12
+                || password.getBytes(StandardCharsets.UTF_8).length > 72) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Password must be at least 12 characters and at most 72 UTF-8 bytes");
+        }
+        if (!password.equals(request.getConfirmPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passwords do not match");
+        }
+
+        String username = request.getUsername().trim();
+        if (userRepository.existsByUsername(username)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "That username is already in use");
+        }
+
+        Role role = roleRepository.findByName(roleName)
+                .orElseGet(() -> roleRepository.save(new Role(roleName)));
+        String fullName = request.getFullName() == null || request.getFullName().isBlank()
+                ? username : request.getFullName().trim();
+        User user = new User(username, passwordEncoder.encode(password), fullName);
+        user.setRoles(Set.of(role));
+        user.setEnabled(true);
+        return mapToDto(userRepository.save(user));
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isInitialSetupRequired() {
+        return userRepository.count() == 0;
     }
 
     private UserDto createAdmin(AuthRequest request) {
@@ -74,20 +109,29 @@ public class AuthService {
         return mapToDto(saved);
     }
 
+    @Transactional(noRollbackFor = BadCredentialsException.class)
     public UserDto login(AuthRequest request) {
         User user = userRepository.findByUsername(request.getUsername().trim())
                 .orElseThrow(() -> new BadCredentialsException("Invalid username or password"));
 
+        LocalDateTime now = LocalDateTime.now();
+        if (user.getLockedUntil() != null) {
+            if (user.getLockedUntil().isAfter(now)) {
+                throw new BadCredentialsException("Account locked. Try again in 15 minutes.");
+            }
+            user.setLockedUntil(null);
+            user.setFailedLoginAttempts(0);
+            user.setEnabled(true);
+        }
         if (!user.isEnabled()) {
-            throw new BadCredentialsException("Account is locked temporarily");
+            throw new BadCredentialsException("Account is disabled");
         }
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             int failedAttempts = user.getFailedLoginAttempts() + 1;
             user.setFailedLoginAttempts(failedAttempts);
             if (failedAttempts >= 5) {
-                user.setEnabled(false);
-                user.setLockedUntil(LocalDateTime.now().plusMinutes(15));
+                user.setLockedUntil(now.plusMinutes(15));
             }
             userRepository.save(user);
             throw new BadCredentialsException("Invalid password");
@@ -101,11 +145,7 @@ public class AuthService {
     }
 
     @Transactional
-    public UserDto createKitchenUser(KitchenUserRequest request) {
-        return createKitchenUserAccount(request);
-    }
-
-    @Transactional
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
     public UserDto registerKitchenUser(KitchenUserRequest request) {
         return createKitchenUserAccount(request);
     }

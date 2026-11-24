@@ -4,6 +4,8 @@ import com.restaurant.management.dto.MenuItemDto;
 import com.restaurant.management.dto.MenuItemRequest;
 import com.restaurant.management.entity.MenuItem;
 import com.restaurant.management.repository.MenuItemRepository;
+import com.restaurant.management.repository.CustomerOrderRepository;
+import com.restaurant.management.entity.OrderStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,10 +19,15 @@ import java.util.List;
 @RequiredArgsConstructor
 public class MenuService {
     private final MenuItemRepository menuItemRepository;
+    private final CustomerOrderRepository orderRepository;
 
     @Transactional(readOnly = true)
-    public List<MenuItemDto> getMenu() {
-        return menuItemRepository.findAllByOrderByNameAsc().stream().map(this::toDto).toList();
+    public List<MenuItemDto> getMenu(String search) {
+        var items = search == null || search.isBlank()
+                ? menuItemRepository.findAllByOrderByNameAsc()
+                : menuItemRepository.findByNameContainingIgnoreCaseOrCategoryContainingIgnoreCaseOrderByNameAsc(
+                        search.trim(), search.trim());
+        return items.stream().map(this::toDto).toList();
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -42,7 +49,13 @@ public class MenuService {
     @PreAuthorize("hasRole('ADMIN')")
     @Transactional
     public void delete(long id) {
-        menuItemRepository.delete(findById(id));
+        MenuItem item = findById(id);
+        if (orderRepository.existsActiveOrderForMenuItem(item.getId(),
+                List.of(OrderStatus.NEW, OrderStatus.PREPARING, OrderStatus.READY))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Menu items linked to active orders cannot be deleted");
+        }
+        menuItemRepository.delete(item);
     }
 
     private MenuItem findById(long id) {
@@ -53,6 +66,8 @@ public class MenuService {
     private void apply(MenuItem item, MenuItemRequest request) {
         item.setName(request.name().trim());
         item.setDescription(request.description() == null ? "" : request.description().trim());
+        item.setCategory(request.category() == null || request.category().isBlank()
+            ? null : request.category().trim());
         item.setPrice(request.price().setScale(2, java.math.RoundingMode.HALF_UP));
         item.setImageUrl(request.imageUrl());
         item.setAvailable(request.available() == null || request.available());
@@ -63,6 +78,7 @@ public class MenuService {
                 item.getId(),
                 item.getName(),
                 item.getDescription(),
+                item.getCategory(),
                 item.getPrice(),
                 item.getImageUrl(),
                 item.isAvailable()

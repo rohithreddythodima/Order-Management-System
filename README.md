@@ -46,17 +46,17 @@ The frontend runs on `http://localhost:5173` and proxies `/api` calls to the bac
 
 ### Accounts and roles
 
-1. Open `http://localhost:5173/login` and choose **Administrator sign in** or **Kitchen staff sign in**. Each sign-in page includes a matching account-creation form. Use a unique username and a password of at least 12 characters.
+1. Open `http://localhost:5173/login` and choose a staff workspace. Kitchen, waiter, and cashier accounts can sign up from their sign-in pages. The administrator signup is available only for initial setup, while no accounts exist. Use a unique username and a password of at least 12 characters.
 2. Administrators can manage menu items, orders, reports, and kitchen accounts. Kitchen staff see the kitchen queue and can update order status; they cannot edit the menu or delete orders.
 3. Customers use **Customer order** or `/customer` without logging in. A new order receives a random tracking code. It is saved in that browser and can also be entered on another device to check order status. Treat the code like a private order link.
 
-**Security note:** Account creation is open from the administrator and kitchen sign-in pages as requested. Anyone who can reach the app can create an administrator account. Do not expose this configuration to the public internet; for production, restrict account creation to authorized administrators and use HTTPS.
+**Security note:** Kitchen, waiter, and cashier self-registration is open to anyone who can reach the app. Administrator signup is restricted to initial setup. Do not expose this configuration to the public internet; for production, restrict staff signup to authorized administrators and use HTTPS.
 
 The backend creates tables automatically with Hibernate. `database/migrations/` contains the equivalent schema evolution for deployments that run SQL migrations themselves; apply `V3__kitchen_roles_and_order_tracking.sql` to add the kitchen role and tracking-code index to an existing installation. Reports show actual saved orders; an empty database correctly reports zero sales.
 
 ## Optional demo data
 
-To try the application with sample Canadian-inspired menu items and 30 days of clearly labeled example orders, run `database/demo_seed.sql` against `restaurant_management` after starting the backend once. The seed can be rerun safely; the Reports and Overview pages identify the sample totals, and the sample orders can be deleted from Orders.
+The backend inserts 33 sample Canadian-inspired menu items when they are missing. To add 30 days of clearly labeled example orders, run `database/demo_seed.sql` against `restaurant_management` after starting the backend once. The seed can be rerun safely; the Reports and Overview pages identify the sample totals, and the sample orders can be deleted from Orders.
 
 The sample menu photos are served locally from `frontend/public/images/`.
 

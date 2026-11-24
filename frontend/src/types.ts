@@ -18,12 +18,20 @@ export interface MenuItem {
   id: number;
   name: string;
   description: string;
+  category: string | null;
   price: number;
   imageUrl: string | null;
   available: boolean;
 }
 
 export type OrderStatus = 'NEW' | 'PREPARING' | 'READY' | 'COMPLETED';
+export type TableStatus = 'AVAILABLE' | 'OCCUPIED' | 'RESERVED';
+
+export interface RestaurantTable {
+  id: number;
+  status: TableStatus;
+  activeOrderId: number | null;
+}
 
 export interface OrderLineItem {
   menuItemId: number;
@@ -41,6 +49,8 @@ export interface Order {
   createdAt: string;
   items: OrderLineItem[];
   trackingCode: string | null;
+  tableId?: number | null;
+  waiterUsername?: string | null;
 }
 
 export type TrackedOrder = Omit<Order, 'trackingCode'>;
