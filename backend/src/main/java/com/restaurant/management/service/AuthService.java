@@ -9,6 +9,7 @@ import com.restaurant.management.entity.User;
 import com.restaurant.management.repository.RoleRepository;
 import com.restaurant.management.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -28,10 +29,14 @@ public class AuthService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
 
+    @Value("${order-desk.auth.admin-self-signup:false}")
+    private boolean adminSelfSignup;
+
     @Transactional
     public UserDto registerFirstAdmin(AuthRequest request) {
-        if (userRepository.count() > 0) {
-            throw new IllegalStateException("Initial admin already exists");
+        if (!isInitialSetupRequired()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Initial administrator setup is only available when no user profiles exist");
         }
         return createAdmin(request);
     }
@@ -42,30 +47,25 @@ public class AuthService {
     }
 
     @Transactional
+    public UserDto registerAdditionalAdmin(AuthRequest request) {
+        return createAdmin(request);
+    }
+
+    @Transactional
     public UserDto registerStaffAccount(AuthRequest request, RoleName roleName) {
-        if (roleName != RoleName.KITCHEN && roleName != RoleName.WAITER && roleName != RoleName.CASHIER) {
+        if (roleName == RoleName.ADMIN && !adminSelfSignup) {
+            return registerFirstAdmin(request);
+        }
+        if (roleName != RoleName.ADMIN && roleName != RoleName.KITCHEN
+                && roleName != RoleName.WAITER && roleName != RoleName.CASHIER) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Self-registration is not available for this role");
         }
-        String password = request.getPassword();
-        if (password == null || password.length() < 12
-                || password.getBytes(StandardCharsets.UTF_8).length > 72) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Password must be at least 12 characters and at most 72 UTF-8 bytes");
-        }
-        if (!password.equals(request.getConfirmPassword())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passwords do not match");
-        }
-
-        String username = request.getUsername().trim();
-        if (userRepository.existsByUsername(username)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "That username is already in use");
-        }
-
+        String username = validateSignup(request);
         Role role = roleRepository.findByName(roleName)
                 .orElseGet(() -> roleRepository.save(new Role(roleName)));
         String fullName = request.getFullName() == null || request.getFullName().isBlank()
                 ? username : request.getFullName().trim();
-        User user = new User(username, passwordEncoder.encode(password), fullName);
+        User user = new User(username, passwordEncoder.encode(request.getPassword()), fullName);
         user.setRoles(Set.of(role));
         user.setEnabled(true);
         return mapToDto(userRepository.save(user));
@@ -77,21 +77,7 @@ public class AuthService {
     }
 
     private UserDto createAdmin(AuthRequest request) {
-        if (request.getPassword() == null || request.getPassword().isBlank()) {
-            throw new IllegalArgumentException("Password is required");
-        }
-        if (request.getPassword().length() < 12
-                || request.getPassword().getBytes(StandardCharsets.UTF_8).length > 72) {
-            throw new IllegalArgumentException("Administrator password must be at least 12 characters and at most 72 UTF-8 bytes");
-        }
-        if (!request.getPassword().equals(request.getConfirmPassword())) {
-            throw new IllegalArgumentException("Passwords do not match");
-        }
-        String username = request.getUsername().trim();
-        if (userRepository.existsByUsername(username)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "That username is already in use");
-        }
-
+        String username = validateSignup(request);
         Role adminRole = roleRepository.findByName(RoleName.ADMIN)
                 .orElseGet(() -> roleRepository.save(new Role(RoleName.ADMIN)));
 
@@ -107,6 +93,29 @@ public class AuthService {
 
         User saved = userRepository.save(user);
         return mapToDto(saved);
+    }
+
+    private String validateSignup(AuthRequest request) {
+        String username = request.getUsername() == null ? "" : request.getUsername().trim();
+        if (username.length() < 3) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username must be at least 3 characters");
+        }
+
+        String password = request.getPassword();
+        if (password == null || password.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password is required");
+        }
+        if (password.length() < 12 || password.getBytes(StandardCharsets.UTF_8).length > 72) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Password must be at least 12 characters and at most 72 UTF-8 bytes");
+        }
+        if (!password.equals(request.getConfirmPassword())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Passwords do not match");
+        }
+        if (userRepository.existsByUsername(username)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "That username is already in use");
+        }
+        return username;
     }
 
     @Transactional(noRollbackFor = BadCredentialsException.class)

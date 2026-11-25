@@ -189,6 +189,7 @@ textarea { resize: vertical; }
 .auth-field { display: grid; gap: 6px; }
 .auth-field label { color: #35443a; font-size: .83rem; font-weight: 700; }
 .auth-field input { margin: 0; }
+.auth-signup { width: 100%; margin-top: 10px; }
 .auth-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 16px; margin-top: 20px; font-size: .83rem; }
 .auth-links a { color: var(--color-primary); font-weight: 600; text-decoration-color: #b7cfbd; text-underline-offset: 3px; }
 .auth-links a:hover { color: var(--color-primary-dark); text-decoration-color: currentColor; }
@@ -223,6 +224,9 @@ textarea { resize: vertical; }
 .portal-options > h2 { font-size: 1.5rem; }
 .portal-description { margin-top: 7px; font-size: .87rem; line-height: 1.55; }
 .portal-grid { display: grid; gap: 9px; margin-top: 22px; }
+.portal-workspace { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.portal-workspace .portal-link { grid-template-columns: auto minmax(0, 1fr); }
+.portal-signup { min-height: 44px; padding-inline: .75rem; font-size: .82rem; white-space: nowrap; }
 .portal-link {
   display: grid;
   min-height: 68px;

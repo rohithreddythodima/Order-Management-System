@@ -16,12 +16,15 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -45,6 +48,13 @@ public class AuthController {
     @PostMapping("/register-admin")
     public ResponseEntity<AuthResponse> registerAdmin(@Valid @RequestBody AuthRequest request) {
         UserDto user = authService.registerAdmin(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new AuthResponse("Administrator account created successfully", user));
+    }
+
+    @PostMapping("/register-additional-admin")
+    public ResponseEntity<AuthResponse> registerAdditionalAdmin(@Valid @RequestBody AuthRequest request) {
+        UserDto user = authService.registerAdditionalAdmin(request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new AuthResponse("Administrator account created successfully", user));
     }
@@ -79,6 +89,19 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(new AuthResponse(ex.getMessage(), null));
         }
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<AuthResponse> handleAuthRequestError(ResponseStatusException error) {
+        return ResponseEntity.status(error.getStatusCode())
+                .body(new AuthResponse(error.getReason(), null));
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<AuthResponse> handleInvalidAuthFields(MethodArgumentNotValidException error) {
+        var fieldError = error.getBindingResult().getFieldError();
+        String message = fieldError == null ? "Check the account details and try again" : fieldError.getDefaultMessage();
+        return ResponseEntity.badRequest().body(new AuthResponse(message, null));
     }
 
     @GetMapping("/me")

@@ -6,8 +6,18 @@ import { api } from '../api';
 import { AuthResponse } from '../types';
 
 type LoginType = 'admin' | 'kitchen' | 'waiter' | 'cashier';
-type FormMode = 'login' | 'register';
 type AccountForm = { username: string; password: string; confirmPassword: string; fullName: string };
+
+const roleNames = { admin: 'Administrator', kitchen: 'Kitchen staff', waiter: 'Waiter', cashier: 'Cashier' };
+const blankAccountForm: AccountForm = { username: '', password: '', confirmPassword: '', fullName: '' };
+const workspaces = [
+  { type: 'admin', title: 'Administrator', description: 'Manage your restaurant workspace.', icon: ShieldCheck },
+  { type: 'kitchen', title: 'Kitchen team', description: 'Manage incoming orders and preparation.', icon: ChefHat },
+  { type: 'waiter', title: 'Waiter', description: 'Take and update table orders.', icon: UtensilsCrossed },
+  { type: 'cashier', title: 'Cashier', description: 'Monitor orders and manage billing.', icon: CircleDollarSign },
+] as const;
+const signupLabel = (role: LoginType) =>
+  `Sign up for ${role === 'admin' ? 'an' : 'a'} ${roleNames[role].toLowerCase()} account`;
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (axios.isAxiosError<{ message?: string }>(error)) {
@@ -19,33 +29,29 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const loginType = searchParams.get('type') as LoginType | null;
+  const type = searchParams.get('type');
+  const loginType = type === 'admin' || type === 'kitchen' || type === 'waiter' || type === 'cashier' ? type : null;
   const accessDenied = searchParams.get('denied') === '1';
-  const mode: FormMode = searchParams.get('mode') === 'register' && loginType ? 'register' : 'login';
-  const [form, setForm] = useState<AccountForm>({ username: '', password: '', confirmPassword: '', fullName: '' });
+  const isRegister = searchParams.get('mode') === 'register' && loginType !== null;
+  const [form, setForm] = useState<AccountForm>(blankAccountForm);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [createdAccountRole, setCreatedAccountRole] = useState<LoginType | null>(null);
   const [loading, setLoading] = useState(false);
-  const [setupRequired, setSetupRequired] = useState(false);
-  const [setupChecked, setSetupChecked] = useState(false);
 
   useEffect(() => {
-    api.get<{ required: boolean }>('/auth/setup-status')
-      .then((response) => setSetupRequired(response.data.required))
-      .catch(() => setSetupRequired(false))
-      .finally(() => setSetupChecked(true));
-  }, []);
+    setError('');
+  }, [loginType, isRegister]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!loginType) return;
     setLoading(true);
     setError('');
-    setNotice('');
+    setCreatedAccountRole(null);
 
     try {
       const response = await api.post<AuthResponse>('/auth/login', {
-        username: form.username,
+        username: form.username.trim(),
         password: form.password,
       });
       const user = response.data.user;
@@ -74,8 +80,14 @@ export default function LoginPage() {
   const registerAccount = async (event: FormEvent) => {
     event.preventDefault();
     if (!loginType) return;
-    if (loginType === 'admin' && !setupRequired) {
-      setError('Initial administrator setup is only available when no user profiles exist.');
+
+    const username = form.username.trim();
+    if (username.length < 3) {
+      setError('Username must be at least 3 characters.');
+      return;
+    }
+    if (new TextEncoder().encode(form.password).length > 72) {
+      setError('Password must be at most 72 UTF-8 bytes. Use a shorter password if it contains emojis or other multibyte characters.');
       return;
     }
     if (form.password !== form.confirmPassword) {
@@ -85,20 +97,16 @@ export default function LoginPage() {
 
     setLoading(true);
     setError('');
-    setNotice('');
+    setCreatedAccountRole(null);
     try {
-      const registrationPath = loginType === 'admin'
-        ? '/auth/setup-admin'
-        : `/auth/register-staff/${loginType.toUpperCase()}`;
-      await api.post(registrationPath, {
-        username: form.username,
+      await api.post(`/auth/register-staff/${loginType.toUpperCase()}`, {
+        username,
         password: form.password,
         confirmPassword: form.confirmPassword,
-        fullName: form.fullName,
+        fullName: form.fullName.trim() || undefined,
       });
-      setForm({ username: form.username, password: '', confirmPassword: '', fullName: '' });
-      setNotice('Account created. Sign in to continue.');
-      if (loginType === 'admin') setSetupRequired(false);
+      setForm({ ...blankAccountForm, username });
+      setCreatedAccountRole(loginType);
       navigate(`/login?type=${loginType}`, { replace: true });
     } catch (requestError: unknown) {
       setError(getErrorMessage(requestError, 'Could not create the account.'));
@@ -119,30 +127,27 @@ export default function LoginPage() {
         </div>
         {accessDenied && <div className="alert-error" role="alert">Access denied. You were returned to the home screen because your account cannot open that workspace.</div>}
 
-        {loginType === 'admin' || loginType === 'kitchen' || loginType === 'waiter' || loginType === 'cashier' ? (
+        {loginType ? (
           <>
             <h2>
-              {mode === 'register'
-                ? loginType === 'admin' ? 'Initial administrator setup' : `Create ${loginType} account`
-                : `${loginType === 'admin' ? 'Administrator' : loginType === 'kitchen' ? 'Kitchen staff' : loginType === 'waiter' ? 'Waiter' : 'Cashier'} sign in`}
+              {isRegister
+                ? `Create ${roleNames[loginType].toLowerCase()} account`
+                : `${roleNames[loginType]} sign in`}
             </h2>
             <p className="muted auth-description">
-              {mode === 'register'
-                ? loginType === 'admin'
-                  ? 'Create the first administrator profile. Setup is only available while no user profiles exist.'
-                  : 'Create a staff account to access this workspace.'
+              {isRegister
+                ? 'Create an account to access this workspace.'
                 : loginType === 'admin'
                   ? 'Sign in to manage menu items, orders, reports, and kitchen staff.'
                   : loginType === 'kitchen'
                     ? 'Sign in to view orders and update their preparation status.'
                     : loginType === 'waiter' ? 'Sign in to enter restaurant orders.' : 'Sign in to monitor orders and handle billing.'}
             </p>
-            {notice && <div className="alert-success" role="status">{notice}</div>}
-            {mode === 'register' && loginType === 'admin' && setupChecked && !setupRequired ? (
-              <div className="alert-error" role="alert">Initial setup is unavailable because user profiles already exist.</div>
-            ) : (
-            <form onSubmit={mode === 'register' ? registerAccount : handleSubmit} className="stacked-form">
-              {mode === 'register' && (
+            {!isRegister && createdAccountRole === loginType && (
+              <div className="alert-success" role="status">Account created. Sign in to continue.</div>
+            )}
+            <form onSubmit={isRegister ? registerAccount : handleSubmit} className="stacked-form">
+              {isRegister && (
                 <div className="auth-field">
                   <label htmlFor="full-name">Full name <span className="muted">(optional)</span></label>
                   <input
@@ -159,7 +164,7 @@ export default function LoginPage() {
                 <input
                   id="username"
                   autoComplete="username"
-                  minLength={3}
+                  minLength={isRegister ? 3 : undefined}
                   maxLength={100}
                   required
                   value={form.username}
@@ -167,19 +172,19 @@ export default function LoginPage() {
                 />
               </div>
               <div className="auth-field">
-                <label htmlFor="password">{mode === 'register' ? 'Password (at least 12 characters)' : 'Password'}</label>
+                <label htmlFor="password">{isRegister ? 'Password (at least 12 characters)' : 'Password'}</label>
                 <input
                   id="password"
                   type="password"
-                  autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-                  minLength={mode === 'register' ? 12 : undefined}
-                  maxLength={72}
+                  autoComplete={isRegister ? 'new-password' : 'current-password'}
+                  minLength={isRegister ? 12 : undefined}
+                  maxLength={isRegister ? undefined : 72}
                   required
                   value={form.password}
                   onChange={(event) => setForm({ ...form, password: event.target.value })}
                 />
               </div>
-              {mode === 'register' && (
+              {isRegister && (
                 <div className="auth-field">
                   <label htmlFor="confirm-password">Confirm password</label>
                   <input
@@ -187,7 +192,6 @@ export default function LoginPage() {
                     type="password"
                     autoComplete="new-password"
                     minLength={12}
-                    maxLength={72}
                     required
                     value={form.confirmPassword}
                     onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })}
@@ -195,19 +199,21 @@ export default function LoginPage() {
                 </div>
               )}
               {error && <div className="alert-error" role="alert">{error}</div>}
-              <button type="submit" className="primary-button" disabled={loading || (mode === 'register' && !setupChecked)}>
+              <button type="submit" className="primary-button" disabled={loading}>
                 {loading
-                  ? (mode === 'register' ? 'Creating account...' : 'Signing in...')
-                  : (mode === 'register' ? 'Create account' : 'Sign in')}
+                  ? (isRegister ? 'Creating account…' : 'Signing in…')
+                  : (isRegister ? `Create ${roleNames[loginType].toLowerCase()} account` : 'Sign in')}
               </button>
             </form>
+            {!isRegister && (
+              <Link className="secondary-button auth-signup" to={`/login?type=${loginType}&mode=register`}>
+                {signupLabel(loginType)}
+              </Link>
             )}
             <p className="auth-links">
-              {mode === 'register'
-                ? <Link to={`/login?type=${loginType}`}>Back to sign in</Link>
-                : loginType === 'admin' && setupRequired && setupChecked
-                  ? <Link to="/setup">Set up the first administrator</Link>
-                  : loginType !== 'admin' ? <Link to={`/login?type=${loginType}&mode=register`}>Sign up</Link> : null}
+              {isRegister && (
+                <Link to={`/login?type=${loginType}`}>Back to sign in</Link>
+              )}
               <Link to="/login">Back to options</Link>
             </p>
           </>
@@ -230,41 +236,29 @@ export default function LoginPage() {
             <section className="portal-options" aria-labelledby="portal-title">
               <p className="eyebrow">GET STARTED</p>
               <h2 id="portal-title">Choose your workspace</h2>
-              <p className="muted portal-description">Customers can order without an account. Staff sign in with their assigned profile.</p>
-            <div className="portal-grid">
-              {setupChecked && setupRequired && (
-                <Link className="portal-link portal-primary" to="/setup">
-                  <span className="portal-icon"><ShieldCheck size={19} aria-hidden="true" /></span>
-                  <span className="portal-link-copy"><strong>Sign up as administrator</strong><small>Create the first restaurant account.</small></span>
+              <p className="muted portal-description">Customers can order without an account. Staff can sign in or sign up for their workspace.</p>
+              <div className="portal-grid">
+                <Link className="portal-link portal-primary" to="/customer">
+                  <span className="portal-icon"><UtensilsCrossed size={19} aria-hidden="true" /></span>
+                  <span className="portal-link-copy"><strong>Customer</strong><small>Explore the menu, order, and track your meal.</small></span>
                   <ArrowRight className="portal-arrow" size={18} aria-hidden="true" />
                 </Link>
-              )}
-              <Link className="portal-link portal-primary" to="/customer">
-                <span className="portal-icon"><UtensilsCrossed size={19} aria-hidden="true" /></span>
-                <span className="portal-link-copy"><strong>Customer</strong><small>Explore the menu, order, and track your meal.</small></span>
-                <ArrowRight className="portal-arrow" size={18} aria-hidden="true" />
-              </Link>
-              <Link className="portal-link" to="/login?type=admin">
-                <span className="portal-icon"><ShieldCheck size={19} aria-hidden="true" /></span>
-                <span className="portal-link-copy"><strong>Administrator</strong><small>Manage your restaurant workspace.</small></span>
-                <ArrowRight className="portal-arrow" size={18} aria-hidden="true" />
-              </Link>
-              <Link className="portal-link" to="/login?type=kitchen">
-                <span className="portal-icon"><ChefHat size={19} aria-hidden="true" /></span>
-                <span className="portal-link-copy"><strong>Kitchen team</strong><small>Manage incoming orders and preparation.</small></span>
-                <ArrowRight className="portal-arrow" size={18} aria-hidden="true" />
-              </Link>
-              <Link className="portal-link" to="/login?type=waiter">
-                <span className="portal-icon"><UtensilsCrossed size={19} aria-hidden="true" /></span>
-                <span className="portal-link-copy"><strong>Waiter</strong><small>Take and update table orders.</small></span>
-                <ArrowRight className="portal-arrow" size={18} aria-hidden="true" />
-              </Link>
-              <Link className="portal-link" to="/login?type=cashier">
-                <span className="portal-icon"><CircleDollarSign size={19} aria-hidden="true" /></span>
-                <span className="portal-link-copy"><strong>Cashier</strong><small>Monitor orders and manage billing.</small></span>
-                <ArrowRight className="portal-arrow" size={18} aria-hidden="true" />
-              </Link>
-            </div>
+                {workspaces.map(({ type, title, description, icon: Icon }) => (
+                  <div className="portal-workspace" key={type}>
+                    <Link className="portal-link" to={`/login?type=${type}`}>
+                      <span className="portal-icon"><Icon size={19} aria-hidden="true" /></span>
+                      <span className="portal-link-copy"><strong>{title}</strong><small>{description}</small></span>
+                    </Link>
+                    <Link
+                      className="secondary-button portal-signup"
+                      to={`/login?type=${type}&mode=register`}
+                      aria-label={signupLabel(type)}
+                    >
+                      Sign up
+                    </Link>
+                  </div>
+                ))}
+              </div>
             </section>
           </div>
         )}

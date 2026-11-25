@@ -161,3 +161,56 @@ WHERE name IN (
 
 DELETE FROM menu_items
 WHERE name IN ('Baked Mac and Cheese', 'Garden Harvest Salad');
+
+INSERT INTO menu_items (name, description, category, price, available, created_at)
+SELECT seed.name, seed.description, seed.category, seed.price, TRUE, CURRENT_TIMESTAMP
+FROM (VALUES
+    ('Halifax Donair', 'Spiced beef, tomato, onion, and sweet garlic sauce in warm pita.', 'Sandwiches', 16.50),
+    ('Atlantic Lobster Roll', 'Chilled lobster with lemon mayo and celery on a toasted split-top bun.', 'Sandwiches', 24.00),
+    ('Calgary Ginger Beef', 'Crispy beef strips in a sweet and spicy ginger sauce with steamed rice.', 'Mains', 20.50),
+    ('PEI Steamed Mussels', 'Island mussels steamed with garlic, white wine, and parsley.', 'Seafood', 18.50),
+    ('BC Spot Prawns', 'Pacific spot prawns sauteed in lemon-garlic butter with grilled bread.', 'Seafood', 24.00),
+    ('Acadian Rappie Pie', 'Grated potatoes baked with tender chicken and savoury broth until golden.', 'Mains', 18.00),
+    ('Pan-Seared Arctic Char', 'Arctic char with lemon-dill butter and roasted root vegetables.', 'Seafood', 25.00),
+    ('Newfoundland Toutons', 'Pan-fried bread dough served warm with butter and molasses.', 'Breakfast', 8.50),
+    ('Jiggs'' Dinner', 'Salt beef, cabbage, carrots, and potatoes with peas pudding.', 'Mains', 21.00),
+    ('Maritime Seafood Chowder', 'Haddock, mussels, and potatoes in a creamy herb broth.', 'Soups', 13.50),
+    ('Windsor-Style Pizza', 'Thin-crust pizza with shredded pepperoni, mushrooms, and mozzarella.', 'Pizza', 18.00),
+    ('Quebec Cretons Toast', 'Spiced pork spread served with toast and tangy mustard.', 'Breakfast', 9.50),
+    ('Quebec Pate Chinois', 'Baked layers of seasoned ground beef, corn, and mashed potatoes.', 'Mains', 17.50),
+    ('Montreal Steamie', 'A steamed hot dog and bun with mustard, chopped onion, and shredded cabbage.', 'Sandwiches', 9.50),
+    ('Winnipeg Honey Dill Chicken Fingers', 'Crispy chicken fingers with honey-dill dipping sauce and fries.', 'Mains', 16.50),
+    ('Manitoba Pickerel', 'Pan-fried pickerel with lemon, herb butter, and roasted vegetables.', 'Seafood', 23.50),
+    ('Alberta Bison Burger', 'Grilled bison with aged cheddar, pickles, and caramelized onions on a bun.', 'Sandwiches', 21.00),
+    ('Saskatoon Berry Pie', 'Flaky pastry filled with sweet Saskatoon berries.', 'Desserts', 8.50),
+    ('Quebec Pouding Chomeur', 'Warm vanilla cake baked in maple caramel sauce.', 'Desserts', 8.50),
+    ('Winnipeg Schmoo Torte', 'Pecan sponge cake layered with whipped cream and caramel sauce.', 'Desserts', 9.00)
+) AS seed(name, description, category, price)
+WHERE NOT EXISTS (SELECT 1 FROM menu_items WHERE menu_items.name = seed.name);
+
+UPDATE menu_items AS item
+SET image_url = photo.image_url
+FROM (VALUES
+    ('Halifax Donair', '/images/halifax-donair.webp'),
+    ('Atlantic Lobster Roll', '/images/atlantic-lobster-roll.webp'),
+    ('Calgary Ginger Beef', '/images/calgary-ginger-beef.webp'),
+    ('PEI Steamed Mussels', '/images/pei-steamed-mussels.webp'),
+    ('BC Spot Prawns', '/images/bc-spot-prawns.webp'),
+    ('Acadian Rappie Pie', '/images/acadian-rappie-pie.webp'),
+    ('Pan-Seared Arctic Char', '/images/pan-seared-arctic-char.webp'),
+    ('Newfoundland Toutons', '/images/newfoundland-toutons.webp'),
+    ('Jiggs'' Dinner', '/images/jiggs-dinner.webp'),
+    ('Maritime Seafood Chowder', '/images/maritime-seafood-chowder.webp'),
+    ('Windsor-Style Pizza', '/images/windsor-style-pizza.webp'),
+    ('Quebec Cretons Toast', '/images/quebec-cretons-toast.webp'),
+    ('Quebec Pate Chinois', '/images/quebec-pate-chinois.webp'),
+    ('Montreal Steamie', '/images/montreal-steamie.webp'),
+    ('Winnipeg Honey Dill Chicken Fingers', '/images/winnipeg-honey-dill-chicken-fingers.webp'),
+    ('Manitoba Pickerel', '/images/manitoba-pickerel.webp'),
+    ('Alberta Bison Burger', '/images/alberta-bison-burger.webp'),
+    ('Saskatoon Berry Pie', '/images/saskatoon-berry-pie.webp'),
+    ('Quebec Pouding Chomeur', '/images/quebec-pouding-chomeur.webp'),
+    ('Winnipeg Schmoo Torte', '/images/winnipeg-schmoo-torte.webp')
+) AS photo(name, image_url)
+WHERE item.name = photo.name
+    AND (item.image_url IS NULL OR TRIM(item.image_url) = '');

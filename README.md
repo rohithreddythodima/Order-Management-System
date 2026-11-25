@@ -31,7 +31,7 @@ Install JDK 17 or later, Maven, and Node.js 20 or later. The default backend sto
 
 ```bash
 cd backend
-mvn spring-boot:run
+mvn spring-boot:run "-Dspring-boot.run.arguments=--server.address=127.0.0.1 --order-desk.auth.admin-self-signup=true"
 ```
 
 2. Start the frontend in a second terminal:
@@ -39,7 +39,7 @@ mvn spring-boot:run
 ```bash
 cd frontend
 npm ci
-npm run dev
+npm run dev -- --host 127.0.0.1
 ```
 
 The frontend runs on `http://localhost:5173` and proxies `/api` calls to the backend on `http://localhost:8080`.
@@ -48,11 +48,11 @@ To build and test locally, run `mvn verify` in `backend/` and `npm run build` in
 
 ### Accounts and roles
 
-1. Open `http://localhost:5173/login` and choose a staff workspace. Kitchen, waiter, and cashier accounts can sign up from their sign-in pages. The administrator signup is available only for initial setup, while no accounts exist. Use a unique username and a password of at least 12 characters.
+1. Open `http://localhost:5173/login` and choose a staff workspace. Choose **Sign up** for Administrator, Kitchen, Waiter, or Cashier to create an account, then sign in to that workspace. Use a unique username and a password of at least 12 characters.
 2. Administrators can manage menu items, tables, staff, orders, and reports. Each staff workspace can browse the menu. Kitchen staff prepare items and mark them ready. Waiters can serve ready items from their table orders and shared pickup orders. When the last item is served, the order becomes served and its table becomes available.
 3. Customers use **Customer order** or `/customer` without logging in. A new order receives a random tracking code. It is saved in that browser and can also be entered on another device to check order status. Treat the code like a private order link.
 
-**Security note:** Kitchen, waiter, and cashier self-registration is open to anyone who can reach the app. Administrator signup is restricted to initial setup. Do not expose this configuration to the public internet; for production, restrict staff signup to authorized administrators and use HTTPS.
+**Local demo access:** The commands above bind both services to this computer and enable direct administrator signup. Without the demo flag, anonymous administrator signup is limited to first-time setup. For production, restrict staff signup to authorized administrators and use HTTPS.
 
 ### Optional PostgreSQL setup
 
@@ -60,6 +60,6 @@ Create a PostgreSQL database and export the `SPRING_*` variables in `.env.exampl
 
 ## Optional demo data
 
-The backend inserts 33 sample Canadian-inspired menu items when they are missing. To add 30 days of clearly labeled example orders, run `database/demo_seed.sql` against a PostgreSQL installation after starting the backend once. The seed can be rerun safely; the Reports and Overview pages identify the sample totals, and the sample orders can be deleted from Orders.
+The backend inserts 53 sample Canadian-inspired menu items when they are missing. To add 30 days of clearly labeled example orders, run `database/demo_seed.sql` against a PostgreSQL installation after starting the backend once. The seed can be rerun safely; the Reports and Overview pages identify the sample totals, and the sample orders can be deleted from Orders.
 
 The sample menu photos are served locally from `frontend/public/images/`.

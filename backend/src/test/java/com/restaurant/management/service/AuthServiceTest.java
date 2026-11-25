@@ -19,8 +19,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.restaurant.management.dto.AuthRequest;
 import com.restaurant.management.dto.KitchenUserRequest;
@@ -82,7 +84,7 @@ class AuthServiceTest {
     }
 
     @Test
-    void staffSelfRegistrationAllowsKitchenWaiterAndCashierOnly() {
+    void staffSelfRegistrationAllowsKitchenWaiterAndCashier() {
         BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
         AuthService serviceWithEncoder = new AuthService(userRepository, roleRepository, encoder);
         for (RoleName roleName : Set.of(RoleName.KITCHEN, RoleName.WAITER, RoleName.CASHIER)) {
@@ -103,13 +105,15 @@ class AuthServiceTest {
     }
 
     @Test
-    void staffSelfRegistrationRejectsAdministratorRole() {
+    void administratorSelfSignupRequiresAnEmptyDatabaseByDefault() {
+        when(userRepository.count()).thenReturn(1L);
         AuthService serviceWithEncoder = new AuthService(
                 userRepository, roleRepository, new BCryptPasswordEncoder());
-        AuthRequest request = new AuthRequest();
 
-        assertThrows(org.springframework.web.server.ResponseStatusException.class,
-                () -> serviceWithEncoder.registerStaffAccount(request, RoleName.ADMIN));
+        var error = assertThrows(ResponseStatusException.class,
+                () -> serviceWithEncoder.registerStaffAccount(new AuthRequest(), RoleName.ADMIN));
+
+        assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
         verify(userRepository, never()).save(any(User.class));
     }
 
@@ -119,7 +123,27 @@ class AuthServiceTest {
         AuthService serviceWithEncoder = new AuthService(
                 userRepository, roleRepository, new BCryptPasswordEncoder());
 
-        assertThrows(IllegalStateException.class, () -> serviceWithEncoder.registerFirstAdmin(new AuthRequest()));
+        var error = assertThrows(ResponseStatusException.class,
+                () -> serviceWithEncoder.registerFirstAdmin(new AuthRequest()));
+
+        assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void staffSignupRejectsUsernameThatIsTooShortAfterTrimming() {
+        AuthService serviceWithEncoder = new AuthService(
+                userRepository, roleRepository, new BCryptPasswordEncoder());
+        AuthRequest request = new AuthRequest();
+        request.setUsername(" ab ");
+        request.setPassword("a-very-long-password");
+        request.setConfirmPassword("a-very-long-password");
+
+        var error = assertThrows(ResponseStatusException.class,
+                () -> serviceWithEncoder.registerStaffAccount(request, RoleName.KITCHEN));
+
+        assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        assertEquals("Username must be at least 3 characters", error.getReason());
         verify(userRepository, never()).save(any(User.class));
     }
 
