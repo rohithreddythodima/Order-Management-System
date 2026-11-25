@@ -10,7 +10,6 @@ type MenuForm = { name: string; description: string; category: string; price: st
 type StaffForm = { id: number | null; username: string; fullName: string; password: string; roles: Role[] };
 const emptyMenuForm: MenuForm = { name: '', description: '', category: '', price: '', imageUrl: '' };
 const emptyStaffForm: StaffForm = { id: null, username: '', fullName: '', password: '', roles: ['KITCHEN'] };
-const statuses: OrderStatus[] = ['NEW', 'PREPARING', 'READY', 'COMPLETED'];
 const sectionIcons: Record<Section, ReactNode> = {
   overview: <LayoutDashboard size={18} aria-hidden="true" />,
   orders: <ClipboardList size={18} aria-hidden="true" />,
@@ -26,7 +25,7 @@ const getRoleFromPath = (workspace: string) => {
     case 'waiter': return 'WAITER';
     case 'kitchen': return 'KITCHEN';
     case 'cashier': return 'CASHIER';
-    default: return 'ADMIN';
+    default: return undefined;
   }
 };
 
@@ -67,6 +66,7 @@ export default function DashboardPage() {
   const [tableNumberInput, setTableNumberInput] = useState('');
   const [tableStatusInput, setTableStatusInput] = useState<TableStatus>('AVAILABLE');
   const [selectedTableId, setSelectedTableId] = useState('');
+  const [progressTable, setProgressTable] = useState('');
   const [editingItemId, setEditingItemId] = useState<number | null>(null);
   const [cart, setCart] = useState<Record<number, number>>({});
   const [customerName, setCustomerName] = useState('');
@@ -80,21 +80,19 @@ export default function DashboardPage() {
   const isWaiter = workspace === 'waiter' && (user?.roles.includes('WAITER') ?? false);
   const isCashier = workspace === 'cashier' && (user?.roles.includes('CASHIER') ?? false);
 
-  const refreshData = useCallback(async () => {
-    if (workspace === 'kitchen') {
-      const orderResponse = await api.get<Order[]>('/orders');
-      setOrders(orderResponse.data);
-      return;
-    }
+  const refreshOrders = useCallback(async () => {
+    const response = await api.get<Order[]>('/orders', {
+      params: workspace === 'waiter' ? { assignedTables: true } : undefined,
+    });
+    setOrders(response.data);
+  }, [workspace]);
 
-    const [menuResponse, orderResponse, tableResponse] = await Promise.all([
-      api.get<MenuItem[]>('/menu'),
-      api.get<Order[]>('/orders'),
-      api.get<RestaurantTable[]>('/tables'),
-    ]);
-    setMenu(menuResponse.data);
-    setOrders(orderResponse.data);
-    setTables(tableResponse.data);
+  const refreshData = useCallback(async () => {
+    const menuRequest = api.get<MenuItem[]>('/menu').then(({ data }) => setMenu(data));
+    const tableRequest = workspace !== 'kitchen'
+      ? api.get<RestaurantTable[]>('/tables').then(({ data }) => setTables(data))
+      : undefined;
+    await Promise.all([menuRequest, tableRequest, refreshOrders()]);
     if (workspace === 'admin') {
       const staffResponse = await api.get<UserDto[]>('/admin/staff');
       setStaff(staffResponse.data);
@@ -103,7 +101,7 @@ export default function DashboardPage() {
       const reportResponse = await api.get<SalesReport>('/reports/sales');
       setReport(reportResponse.data);
     }
-  }, [workspace]);
+  }, [refreshOrders, workspace]);
 
   const handleExpiredSession = useCallback((requestError: unknown) => {
     if (axios.isAxiosError(requestError) && [401, 403].includes(requestError.response?.status ?? 0)) {
@@ -130,7 +128,7 @@ export default function DashboardPage() {
       }
       const workspaceRoles = workspace === 'kitchen'
         ? ['KITCHEN', 'CHEF']
-        : [getRoleFromPath(workspace || 'admin')];
+        : [getRoleFromPath(workspace ?? '')];
       if (!workspaceRoles.some((role) => parsed.roles.includes(role as UserDto['roles'][number]))) {
         navigate('/login?denied=1', { replace: true });
         return;
@@ -152,14 +150,14 @@ export default function DashboardPage() {
   }, [handleExpiredSession, navigate, refreshData, workspace]);
 
   useEffect(() => {
-    if (workspace !== 'kitchen') return;
+    if (!user || activeSection !== 'orders') return;
     const timer = window.setInterval(() => {
-      refreshData().catch((requestError: unknown) => {
-        if (!handleExpiredSession(requestError)) setError(getErrorMessage(requestError, 'Could not refresh the kitchen queue.'));
+      refreshOrders().catch((requestError: unknown) => {
+        if (!handleExpiredSession(requestError)) setError(getErrorMessage(requestError, 'Could not refresh orders.'));
       });
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [handleExpiredSession, refreshData, workspace]);
+  }, [activeSection, handleExpiredSession, refreshOrders, user]);
 
   const title = useMemo(() => {
     switch (workspace) {
@@ -365,14 +363,21 @@ export default function DashboardPage() {
     }
   };
 
-  const updateOrderStatus = async (id: number, status: OrderStatus) => {
+  const updateItemStatus = async (orderId: number, itemId: number, status: OrderStatus) => {
     setError('');
+    setSaving(true);
     try {
-      await api.patch(`/orders/${id}/status`, { status });
-      await refreshData();
+      await api.patch(`/orders/${orderId}/items/${itemId}/status`, { status });
+      if (isWaiter && status === 'SERVED') {
+        await refreshData();
+      } else {
+        await refreshOrders();
+      }
     } catch (requestError: unknown) {
       if (handleExpiredSession(requestError)) return;
-      setError(getErrorMessage(requestError, 'Could not update the order.'));
+      setError(getErrorMessage(requestError, 'Could not update the item.'));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -421,6 +426,12 @@ export default function DashboardPage() {
     return <main className="loading-screen">Loading your workspace…</main>;
   }
 
+  const assignedTableNumbers = [...new Set(orders.flatMap((order) => order.tableId == null ? [] : [order.tableId]))]
+    .sort((first, second) => first - second);
+  const visibleOrders = isWaiter && progressTable
+    ? orders.filter((order) => (order.tableId?.toString() ?? 'pickup') === progressTable)
+    : orders;
+
   const renderOrders = () => (
     <div className="orders-layout">
       {(isAdmin || isWaiter) && <section className="panel order-builder">
@@ -468,18 +479,34 @@ export default function DashboardPage() {
 
       <section className="panel">
         <div className="section-heading"><div><p className="eyebrow">Live tickets</p><h2>Recent orders</h2></div></div>
-        {orders.length === 0 ? <p className="empty-state">Orders you place will appear here.</p> : (
+        {isWaiter && <>
+          <label className="field-label" htmlFor="progress-table">Filter order progress by table</label>
+          <select id="progress-table" value={progressTable} onChange={(event) => setProgressTable(event.target.value)}>
+            <option value="">All assigned tables and pickup</option>
+            {assignedTableNumbers.map((id) => <option key={id} value={id}>Table {id}</option>)}
+            <option value="pickup">Pickup</option>
+          </select>
+        </>}
+        {visibleOrders.length === 0 ? <p className="empty-state">No orders to show.</p> : (
           <div className="order-list">
-            {orders.map((order) => (
+            {visibleOrders.map((order) => (
               <article className="order-card" key={order.id}>
                 <div className="order-card-header"><div><strong>Order #{order.id}{order.tableId ? ` · Table ${order.tableId}` : ''}</strong><span>{order.customerName}{order.waiterUsername ? ` · Waiter ${order.waiterUsername}` : ''}</span></div><strong>{formatPrice(order.total)}</strong></div>
-                <p className="order-items-summary">{order.items.map((item) => `${item.quantity} × ${item.itemName}`).join(' · ')}</p>
+                <ul className="kitchen-items">
+                  {order.items.map((item) => (
+                    <li key={item.id} className="order-item-progress">
+                      <span>{item.quantity} × {item.itemName}</span>
+                      <span className={`status-badge status-${item.status.toLowerCase()}`}>{item.status}</span>
+                      {isWaiter && item.status === 'READY' && (
+                        <button className="text-button" type="button" disabled={saving}
+                          aria-label={`Serve ${item.itemName} for order ${order.id}`}
+                          onClick={() => updateItemStatus(order.id, item.id, 'SERVED')}>Serve</button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
                 <div className="order-card-footer"><span>{formatDate(order.createdAt)}</span><div className="row-actions">
-                  {(isAdmin || isKitchen || isCashier)
-                    ? <select aria-label={`Status for order ${order.id}`} value={order.status} onChange={(event) => updateOrderStatus(order.id, event.target.value as OrderStatus)}>
-                      {Array.from(new Set(isCashier ? [order.status, ...(order.status === 'READY' ? ['COMPLETED' as OrderStatus] : [])] : isKitchen ? ['PREPARING', 'READY'] as OrderStatus[] : statuses)).map((status) => <option value={status} key={status}>{status.replace('_', ' ')}</option>)}
-                    </select>
-                    : <span className={`status-badge status-${order.status.toLowerCase()}`}>{order.status.replace('_', ' ')}</span>}
+                  <span className={`status-badge status-${order.status.toLowerCase()}`}>{order.status}</span>
                   {isCashier && <button className="text-button" type="button" onClick={() => setBillOrder(order)}>View bill</button>}
                   {isAdmin && <button className="text-button danger" type="button" onClick={() => deleteOrder(order)}>Delete</button>}
                 </div></div>
@@ -492,32 +519,42 @@ export default function DashboardPage() {
   );
 
   const renderKitchenOrders = () => {
-    const newOrders = orders.filter((order) => order.status === 'NEW');
-    const preparingOrders = orders.filter((order) => order.status === 'PREPARING' || order.status === 'READY');
-    const completedOrders = orders.filter((order) => order.status === 'COMPLETED');
+    const queue = orders.flatMap((order) => order.items
+      .filter((item) => item.status === 'NEW' || item.status === 'PREPARING')
+      .map((item) => ({ order, item })))
+      .sort((first, second) => first.item.createdAt.localeCompare(second.item.createdAt) || first.item.id - second.item.id);
+
     return (
-      <>
-        <section className="cards-grid kitchen-counts">
-          <div className="metric-card"><div><span>Incoming</span><strong>{newOrders.length}</strong></div><span className="metric-icon">New</span></div>
-          <div className="metric-card"><div><span>In progress</span><strong>{preparingOrders.length}</strong></div><span className="metric-icon">Preparing</span></div>
-          <div className="metric-card"><div><span>Completed</span><strong>{completedOrders.length}</strong></div><span className="metric-icon">Done</span></div>
-        </section>
-        <section className="panel">
-          <div className="section-heading"><div><p className="eyebrow">Incoming tickets</p><h2>Kitchen queue</h2></div><span className="muted">{orders.length} total orders</span></div>
-          {orders.length === 0 ? <p className="empty-state">New customer orders will appear here.</p> : (
-            <div className="order-list">
-              {orders.map((order) => (
-                <article className="order-card kitchen-order-card" key={order.id}>
-                  <div className="order-card-header"><div><strong>Order #{order.id}</strong><span>{order.customerName} · {formatDate(order.createdAt)}</span></div><span className={`status-badge status-${order.status.toLowerCase()}`}>{order.status.replace('_', ' ')}</span></div>
-                  <ul className="kitchen-items">{order.items.map((item) => <li key={`${order.id}-${item.menuItemId}-${item.itemName}`}><strong>{item.quantity} ×</strong> {item.itemName}</li>)}</ul>
-                  {order.status === 'NEW' && <button className="primary-button" type="button" onClick={() => updateOrderStatus(order.id, 'PREPARING')}>Start preparing</button>}
-                  {order.status === 'PREPARING' && <button className="primary-button" type="button" onClick={() => updateOrderStatus(order.id, 'READY')}>Mark ready</button>}
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </>
+      <section className="panel">
+        <div className="section-heading">
+          <h2>Kitchen queue</h2><span className="muted">{queue.length} items</span>
+        </div>
+        {queue.length === 0 ? <p className="empty-state">New items will appear here.</p> : (
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>Order</th><th>Table</th><th>Item</th><th>Qty</th><th>Status</th><th>Time received</th><th>Action</th></tr></thead>
+              <tbody>
+                {queue.map(({ order, item }) => (
+                  <tr key={item.id}>
+                    <td>#{order.id}</td>
+                    <td>{order.tableId == null ? 'Pickup' : order.tableId}</td>
+                    <td>{item.itemName}</td>
+                    <td>{item.quantity}</td>
+                    <td><span className={`status-badge status-${item.status.toLowerCase()}`}>{item.status}</span></td>
+                    <td>{formatDate(item.createdAt)}</td>
+                    <td>
+                      <button className="text-button" type="button" disabled={saving}
+                        onClick={() => updateItemStatus(order.id, item.id, item.status === 'NEW' ? 'PREPARING' : 'READY')}>
+                        {item.status === 'NEW' ? 'Start preparing' : 'Mark ready'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     );
   };
 
@@ -688,8 +725,10 @@ export default function DashboardPage() {
         <nav className="nav-list" aria-label="Main navigation">
           {(isKitchen ? [
             ['orders', 'Kitchen orders'],
+            ['menu', 'Menu'],
           ] as [Section, string][] : isCashier && !isAdmin ? [
             ['orders', 'Order monitoring'],
+            ['menu', 'Menu'],
             ['reports', 'Billing & reports'],
           ] as [Section, string][] : isWaiter && !isAdmin ? [
             ['orders', 'Table orders'],
@@ -730,7 +769,7 @@ export default function DashboardPage() {
         {notice && <div className="alert-success" role="status">{notice}</div>}
         {!isKitchen && activeSection === 'overview' && renderOverview()}
         {activeSection === 'orders' && (isKitchen ? renderKitchenOrders() : renderOrders())}
-        {!isKitchen && !isCashier && activeSection === 'menu' && renderMenu()}
+        {activeSection === 'menu' && renderMenu()}
         {!isKitchen && isAdmin && activeSection === 'staff' && renderStaff()}
         {!isKitchen && isAdmin && activeSection === 'tables' && renderTables()}
         {!isKitchen && (isAdmin || user.roles.includes('CASHIER')) && activeSection === 'reports' && renderReports()}
@@ -738,7 +777,7 @@ export default function DashboardPage() {
           <div className="section-heading"><div><p className="eyebrow">Billing</p><h2 id="bill-title">Bill for order #{billOrder.id}</h2></div><button className="text-button" type="button" onClick={() => setBillOrder(null)}>Close</button></div>
           <p>{billOrder.customerName}{billOrder.tableId ? ` · Table ${billOrder.tableId}` : ''} · {formatDate(billOrder.createdAt)}</p>
           <div className="table-scroll"><table className="data-table"><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Line total</th></tr></thead><tbody>
-            {billOrder.items.map((item) => <tr key={`${billOrder.id}-${item.menuItemId}`}><td>{item.itemName}</td><td>{item.quantity}</td><td>{formatPrice(item.unitPrice)}</td><td>{formatPrice(item.lineTotal)}</td></tr>)}
+            {billOrder.items.map((item) => <tr key={item.id}><td>{item.itemName}</td><td>{item.quantity}</td><td>{formatPrice(item.unitPrice)}</td><td>{formatPrice(item.lineTotal)}</td></tr>)}
           </tbody><tfoot><tr><th colSpan={3}>Total</th><th>{formatPrice(billOrder.total)}</th></tr></tfoot></table></div>
           <button className="primary-button" type="button" onClick={() => window.print()}>Print bill</button>
         </section>}

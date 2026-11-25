@@ -2,6 +2,8 @@ package com.restaurant.management.repository;
 
 import com.restaurant.management.entity.CustomerOrder;
 import com.restaurant.management.entity.OrderStatus;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
@@ -10,11 +12,23 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Collection;
+import java.util.Optional;
 
 public interface CustomerOrderRepository extends JpaRepository<CustomerOrder, Long> {
     List<CustomerOrder> findAllByOrderByCreatedAtDesc();
 
-    java.util.Optional<CustomerOrder> findByTrackingCode(String trackingCode);
+    @Query("""
+            select o from CustomerOrder o left join o.createdBy waiter
+            where waiter.username = :username or o.tableNumber is null and o.restaurantTable is null
+            order by o.createdAt desc, o.id desc
+            """)
+    List<CustomerOrder> findOrdersForWaiter(@Param("username") String username);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from CustomerOrder o where o.id = :id")
+    Optional<CustomerOrder> findForUpdate(@Param("id") long id);
+
+    Optional<CustomerOrder> findByTrackingCode(String trackingCode);
 
     List<CustomerOrder> findByCreatedAtGreaterThanEqualOrderByCreatedAtAsc(LocalDateTime createdAt);
 

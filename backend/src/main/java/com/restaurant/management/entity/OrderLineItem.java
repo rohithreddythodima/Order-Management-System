@@ -2,6 +2,8 @@ package com.restaurant.management.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -14,6 +16,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "order_line_items")
@@ -43,4 +46,11 @@ public class OrderLineItem {
 
     @Column(name = "line_total", nullable = false, precision = 10, scale = 2)
     private BigDecimal lineTotal;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private OrderItemStatus status;
+
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
 }
