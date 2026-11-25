@@ -1,13 +1,12 @@
 # Order Desk
 
-Order Desk is a full-stack restaurant ordering application with public customer ordering and tracking, an administrator menu and staff workspace, and a dedicated kitchen order queue backed by PostgreSQL.
+Order Desk is a full-stack restaurant ordering application with public customer ordering and tracking, an administrator menu and staff workspace, and a dedicated kitchen order queue with a local H2 database and optional PostgreSQL support.
 
 ## Project structure
 
-- `backend/` — Java 25 + Spring Boot 3 backend
+- `backend/` — Java 17+ and Spring Boot 3 backend
 - `frontend/` — React + TypeScript + Vite frontend
 - `database/migrations/` — PostgreSQL migration scripts
-- `docker-compose.yml` — Local orchestration for PostgreSQL, backend, and frontend
 - `.env.example` — Environment variable template
 
 ## Features
@@ -17,55 +16,50 @@ Order Desk is a full-stack restaurant ordering application with public customer 
 - Customers can browse the public menu and place an order without creating an account
 - Order tracking through a private, unguessable tracking code
 - Administrator-only menu item creation, editing, and deletion (including uploaded product photos)
-- Kitchen queue with incoming/preparing/completed counts and order status controls
+- Oldest-first kitchen queue with item timestamps and preparing/ready controls
+- Waiters can filter to their tables and serve ready items. Admins and cashiers can monitor progress and cashiers can view and print bills.
 - Administrator-provisioned kitchen staff accounts with BCrypt-hashed passwords
-- Order creation from available menu items, order status updates, and deletion
+- Order creation from available menu items, automatic served status, and administrator deletion
 - Daily and monthly order/revenue totals calculated from saved orders
 - Role-based dashboard routing; menu changes require an administrator
 
 ## Local setup
 
-1. Start PostgreSQL and create the `restaurant_management` database.
-2. Update the datasource credentials in `backend/src/main/resources/application.yml` if needed.
-3. Use Java 25 and start the backend:
+Install JDK 17 or later, Maven, and Node.js 20 or later. The default backend stores data in `backend/data/` using H2.
+
+1. Start the backend:
 
 ```bash
 cd backend
 mvn spring-boot:run
 ```
 
-4. Start the frontend in a second terminal:
+2. Start the frontend in a second terminal:
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
 The frontend runs on `http://localhost:5173` and proxies `/api` calls to the backend on `http://localhost:8080`.
 
+To build and test locally, run `mvn verify` in `backend/` and `npm run build` in `frontend/`.
+
 ### Accounts and roles
 
 1. Open `http://localhost:5173/login` and choose a staff workspace. Kitchen, waiter, and cashier accounts can sign up from their sign-in pages. The administrator signup is available only for initial setup, while no accounts exist. Use a unique username and a password of at least 12 characters.
-2. Administrators can manage menu items, orders, reports, and kitchen accounts. Kitchen staff see the kitchen queue and can update order status; they cannot edit the menu or delete orders.
+2. Administrators can manage menu items, tables, staff, orders, and reports. Each staff workspace can browse the menu. Kitchen staff prepare items and mark them ready. Waiters can serve ready items from their table orders and shared pickup orders. When the last item is served, the order becomes served and its table becomes available.
 3. Customers use **Customer order** or `/customer` without logging in. A new order receives a random tracking code. It is saved in that browser and can also be entered on another device to check order status. Treat the code like a private order link.
 
 **Security note:** Kitchen, waiter, and cashier self-registration is open to anyone who can reach the app. Administrator signup is restricted to initial setup. Do not expose this configuration to the public internet; for production, restrict staff signup to authorized administrators and use HTTPS.
 
-The backend creates tables automatically with Hibernate. `database/migrations/` contains the equivalent schema evolution for deployments that run SQL migrations themselves; apply `V3__kitchen_roles_and_order_tracking.sql` to add the kitchen role and tracking-code index to an existing installation. Reports show actual saved orders; an empty database correctly reports zero sales.
+### Optional PostgreSQL setup
+
+Create a PostgreSQL database and export the `SPRING_*` variables in `.env.example` before starting the backend. Hibernate manages the schema by default. For installations that apply SQL migrations directly, apply the scripts in `database/migrations/` in version order. V6 backfills legacy item progress and timestamps.
 
 ## Optional demo data
 
-The backend inserts 33 sample Canadian-inspired menu items when they are missing. To add 30 days of clearly labeled example orders, run `database/demo_seed.sql` against `restaurant_management` after starting the backend once. The seed can be rerun safely; the Reports and Overview pages identify the sample totals, and the sample orders can be deleted from Orders.
+The backend inserts 33 sample Canadian-inspired menu items when they are missing. To add 30 days of clearly labeled example orders, run `database/demo_seed.sql` against a PostgreSQL installation after starting the backend once. The seed can be rerun safely; the Reports and Overview pages identify the sample totals, and the sample orders can be deleted from Orders.
 
 The sample menu photos are served locally from `frontend/public/images/`.
-
-## Docker
-
-```bash
-docker compose up --build
-```
-
-## Notes
-
-This is a production-style foundation and a staged implementation aligned to the university requirement document. The project is structured to continue into Sprint 1 and Sprint 2 modules in a clean and extensible way.

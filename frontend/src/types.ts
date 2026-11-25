@@ -24,7 +24,7 @@ export interface MenuItem {
   available: boolean;
 }
 
-export type OrderStatus = 'NEW' | 'PREPARING' | 'READY' | 'COMPLETED';
+export type OrderStatus = 'NEW' | 'PREPARING' | 'READY' | 'SERVED';
 export type TableStatus = 'AVAILABLE' | 'OCCUPIED' | 'RESERVED';
 
 export interface RestaurantTable {
@@ -34,11 +34,14 @@ export interface RestaurantTable {
 }
 
 export interface OrderLineItem {
-  menuItemId: number;
+  id: number;
+  menuItemId: number | null;
   itemName: string;
   unitPrice: number;
   quantity: number;
   lineTotal: number;
+  status: OrderStatus;
+  createdAt: string;
 }
 
 export interface Order {

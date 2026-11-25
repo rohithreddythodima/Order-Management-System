@@ -70,7 +70,7 @@ public class RestaurantTableService {
     }
 
     private RestaurantTable findById(long id) {
-        return tableRepository.findById(id)
+        return tableRepository.findForUpdate(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Table not found"));
     }
 

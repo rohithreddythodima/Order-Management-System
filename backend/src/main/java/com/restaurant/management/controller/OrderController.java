@@ -3,7 +3,8 @@ package com.restaurant.management.controller;
 import com.restaurant.management.dto.OrderDto;
 import com.restaurant.management.dto.OrderRequest;
 import com.restaurant.management.dto.OrderItemsRequest;
-import com.restaurant.management.dto.OrderStatusRequest;
+import com.restaurant.management.dto.OrderItemStatusRequest;
+import com.restaurant.management.entity.OrderItemStatus;
 import com.restaurant.management.dto.OrderTrackingDto;
 import com.restaurant.management.service.OrderService;
 import jakarta.validation.Valid;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -32,8 +34,17 @@ public class OrderController {
 
     @GetMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'KITCHEN', 'CHEF', 'WAITER', 'CASHIER')")
-    public List<OrderDto> getOrders() {
-        return orderService.getOrders();
+    public List<OrderDto> getOrders(@RequestParam(defaultValue = "false") boolean assignedTables,
+                                   Authentication authentication) {
+        boolean waiter = hasRole(authentication, "WAITER");
+        if (assignedTables && !waiter) {
+            throw new AccessDeniedException("Only waiters can access the table orders view");
+        }
+        boolean canViewAll = hasRole(authentication, "ADMIN") || hasRole(authentication, "CASHIER")
+                || hasRole(authentication, "KITCHEN") || hasRole(authentication, "CHEF");
+        return assignedTables || !canViewAll
+                ? orderService.getOrdersForWaiter(authentication.getName())
+                : orderService.getOrders();
     }
 
     @GetMapping("/track/{trackingCode}")
@@ -56,26 +67,26 @@ public class OrderController {
         return orderService.addItems(id, request, authentication.getName());
     }
 
-    @PatchMapping("/{id}/status")
-    @PreAuthorize("hasAnyRole('ADMIN', 'KITCHEN', 'CHEF', 'CASHIER')")
-    public OrderDto updateStatus(@PathVariable long id, @Valid @RequestBody OrderStatusRequest request,
-                                 Authentication authentication) {
-        boolean isAdmin = authentication.getAuthorities().stream()
-                .anyMatch(authority -> authority.getAuthority().equals("ROLE_ADMIN"));
-        boolean isKitchen = authentication.getAuthorities().stream()
-            .anyMatch(authority -> authority.getAuthority().equals("ROLE_KITCHEN")
-                || authority.getAuthority().equals("ROLE_CHEF"));
-        boolean isCashier = authentication.getAuthorities().stream()
-            .anyMatch(authority -> authority.getAuthority().equals("ROLE_CASHIER"));
-        boolean kitchenTransitionAllowed = isKitchen
-                && (request.status() == com.restaurant.management.entity.OrderStatus.PREPARING
-                || request.status() == com.restaurant.management.entity.OrderStatus.READY);
-        boolean cashierTransitionAllowed = isCashier
-                && request.status() == com.restaurant.management.entity.OrderStatus.COMPLETED;
-        if (!isAdmin && !kitchenTransitionAllowed && !cashierTransitionAllowed) {
-            throw new AccessDeniedException("This role cannot set the order to that status");
+    @PatchMapping("/{id}/items/{itemId}/status")
+    @PreAuthorize("hasAnyRole('KITCHEN', 'CHEF', 'WAITER')")
+    public OrderDto updateItemStatus(@PathVariable long id, @PathVariable long itemId,
+                                     @Valid @RequestBody OrderItemStatusRequest request,
+                                     Authentication authentication) {
+        OrderItemStatus status = request.status();
+        boolean permitted = switch (status) {
+            case PREPARING, READY -> hasRole(authentication, "KITCHEN") || hasRole(authentication, "CHEF");
+            case SERVED -> hasRole(authentication, "WAITER");
+            case NEW -> false;
+        };
+        if (!permitted) {
+            throw new AccessDeniedException("This role cannot set an item to that status");
         }
-        return orderService.updateStatus(id, request);
+        return orderService.updateItemStatus(id, itemId, status, authentication.getName());
+    }
+
+    private boolean hasRole(Authentication authentication, String role) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(authority -> authority.getAuthority().equals("ROLE_" + role));
     }
 
     @DeleteMapping("/{id}")

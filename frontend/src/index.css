@@ -323,7 +323,8 @@ textarea { resize: vertical; }
 .status-new { background: #eef2ff; color: #4f46e5; }
 .status-preparing { background: #fff7e8; color: #a9690d; }
 .status-ready { background: #e8f7ef; color: #188452; }
-.status-completed { background: #edf0ed; color: #626d65; }
+.order-item-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.status-served { background: #edf0ed; color: #626d65; }
 .orders-layout { display: grid; grid-template-columns: minmax(310px, .85fr) minmax(0, 1.15fr); align-items: start; gap: 18px; }
 .orders-layout .panel { min-width: 0; }
 .order-builder { position: sticky; top: 22px; }

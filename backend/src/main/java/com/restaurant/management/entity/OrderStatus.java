@@ -4,5 +4,5 @@ public enum OrderStatus {
     NEW,
     PREPARING,
     READY,
-    COMPLETED
+    SERVED
 }

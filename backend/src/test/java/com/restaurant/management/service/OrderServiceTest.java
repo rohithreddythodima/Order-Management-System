@@ -4,11 +4,11 @@ import com.restaurant.management.dto.OrderItemRequest;
 import com.restaurant.management.dto.OrderItemsRequest;
 import com.restaurant.management.dto.OrderRequest;
 import com.restaurant.management.dto.OrderTrackingDto;
-import com.restaurant.management.dto.OrderStatusRequest;
 import com.restaurant.management.entity.CustomerOrder;
 import com.restaurant.management.entity.MenuItem;
 import com.restaurant.management.entity.OrderLineItem;
 import com.restaurant.management.entity.OrderStatus;
+import com.restaurant.management.entity.OrderItemStatus;
 import com.restaurant.management.entity.RestaurantTable;
 import com.restaurant.management.entity.Role;
 import com.restaurant.management.entity.RoleName;
@@ -100,7 +100,7 @@ class OrderServiceTest {
         menuItem.setPrice(new BigDecimal("12.50"));
         menuItem.setAvailable(true);
         when(userRepository.findByUsername("server")).thenReturn(Optional.of(waiter));
-        when(tableRepository.findById(3L)).thenReturn(Optional.of(table));
+        when(tableRepository.findForUpdate(3L)).thenReturn(Optional.of(table));
         when(menuItemRepository.findById(8L)).thenReturn(Optional.of(menuItem));
         when(orderRepository.save(any(CustomerOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -114,7 +114,7 @@ class OrderServiceTest {
     }
 
     @Test
-    void waiterCanAppendItemsToAnActiveOrderAndRequeueIt() {
+    void waiterCanAppendItemsWithoutResettingReadyItemsOrChangingTheirPrice() {
         User waiter = new User("server", "encoded", "Server");
         RestaurantTable table = new RestaurantTable();
         table.setId(3L);
@@ -130,7 +130,7 @@ class OrderServiceTest {
         MenuItem menuItem = new MenuItem();
         menuItem.setId(8L);
         menuItem.setName("Poutine");
-        menuItem.setPrice(new BigDecimal("5.00"));
+        menuItem.setPrice(new BigDecimal("6.00"));
         menuItem.setAvailable(true);
         OrderLineItem existing = new OrderLineItem();
         existing.setOrder(order);
@@ -140,27 +140,48 @@ class OrderServiceTest {
         existing.setQuantity(2);
         existing.setLineTotal(new BigDecimal("10.00"));
         order.getItems().add(existing);
-        when(orderRepository.findById(25L)).thenReturn(Optional.of(order));
+        when(orderRepository.findForUpdate(25L)).thenReturn(Optional.of(order));
         when(menuItemRepository.findById(8L)).thenReturn(Optional.of(menuItem));
-        when(orderRepository.save(any(CustomerOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderRepository.saveAndFlush(any(CustomerOrder.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         var result = orderService.addItems(25L,
                 new OrderItemsRequest(List.of(new OrderItemRequest(8L, 1))), "server");
 
-        assertEquals(new BigDecimal("15.00"), result.total());
+        assertEquals(new BigDecimal("16.00"), result.total());
         assertEquals(OrderStatus.NEW, result.status());
-        assertEquals(3, result.items().get(0).quantity());
+        assertEquals(2, result.items().size());
+        assertEquals(OrderItemStatus.READY, result.items().get(0).status());
+        assertEquals(2, result.items().get(0).quantity());
+        assertEquals(OrderItemStatus.NEW, result.items().get(1).status());
+        assertEquals(new BigDecimal("6.00"), result.items().get(1).lineTotal());
     }
 
     @Test
-    void completedOrderCannotBeReopened() {
+    void servingOnlyFinishesTheOrderAfterTheLastReadyItemIsServed() {
+        User waiter = new User("server", "encoded", "Server");
+        RestaurantTable table = new RestaurantTable();
+        table.setId(3L);
+        table.setStatus(TableStatus.OCCUPIED);
         CustomerOrder order = new CustomerOrder();
         order.setId(25L);
-        order.setStatus(OrderStatus.COMPLETED);
-        when(orderRepository.findById(25L)).thenReturn(Optional.of(order));
+        order.setStatus(OrderStatus.READY);
+        order.setRestaurantTable(table);
+        order.setCreatedBy(waiter);
+        OrderLineItem first = new OrderLineItem();
+        first.setId(40L);
+        OrderLineItem second = new OrderLineItem();
+        second.setId(41L);
+        order.getItems().addAll(List.of(first, second));
+        when(orderRepository.findForUpdate(25L)).thenReturn(Optional.of(order));
 
         assertThrows(ResponseStatusException.class,
-                () -> orderService.updateStatus(25L, new OrderStatusRequest(OrderStatus.NEW)));
-        verify(orderRepository, never()).save(any(CustomerOrder.class));
+                () -> orderService.updateItemStatus(25L, 40L, OrderItemStatus.SERVED, "other-server"));
+        assertEquals(OrderStatus.READY, orderService.updateItemStatus(25L, 40L, OrderItemStatus.SERVED, "server").status());
+        assertEquals(TableStatus.OCCUPIED, table.getStatus());
+        assertEquals(OrderStatus.SERVED, orderService.updateItemStatus(25L, 41L, OrderItemStatus.SERVED, "server").status());
+        assertEquals(TableStatus.AVAILABLE, table.getStatus());
+        assertThrows(ResponseStatusException.class,
+                () -> orderService.updateItemStatus(25L, 41L, OrderItemStatus.PREPARING, "cook"));
+        verify(tableRepository).save(table);
     }
 }

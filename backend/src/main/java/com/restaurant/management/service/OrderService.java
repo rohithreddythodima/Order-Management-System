@@ -5,13 +5,14 @@ import com.restaurant.management.dto.OrderItemRequest;
 import com.restaurant.management.dto.OrderItemsRequest;
 import com.restaurant.management.dto.OrderLineItemDto;
 import com.restaurant.management.dto.OrderRequest;
-import com.restaurant.management.dto.OrderStatusRequest;
 import com.restaurant.management.dto.OrderTrackingDto;
 import com.restaurant.management.entity.CustomerOrder;
 import com.restaurant.management.entity.MenuItem;
 import com.restaurant.management.entity.OrderLineItem;
+import com.restaurant.management.entity.OrderItemStatus;
 import com.restaurant.management.entity.OrderStatus;
 import com.restaurant.management.entity.RestaurantTable;
+import com.restaurant.management.entity.RoleName;
 import com.restaurant.management.entity.TableStatus;
 import com.restaurant.management.entity.User;
 import com.restaurant.management.repository.CustomerOrderRepository;
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -39,6 +41,11 @@ public class OrderService {
     @Transactional(readOnly = true)
     public List<OrderDto> getOrders() {
         return orderRepository.findAllByOrderByCreatedAtDesc().stream().map(this::toDto).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<OrderDto> getOrdersForWaiter(String username) {
+        return orderRepository.findOrdersForWaiter(username).stream().map(this::toDto).toList();
     }
 
     @Transactional
@@ -56,7 +63,7 @@ public class OrderService {
         User actor = actorUsername == null ? null : userRepository.findByUsername(actorUsername)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in to place this order"));
         boolean waiter = actor != null && actor.getRoles().stream()
-                .anyMatch(role -> role.getName() == com.restaurant.management.entity.RoleName.WAITER);
+                .anyMatch(role -> role.getName() == RoleName.WAITER);
         if (waiter && request.tableId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Waiter orders must be assigned to a table");
         }
@@ -68,7 +75,7 @@ public class OrderService {
             order.setCreatedByUsername(actor.getUsername());
         }
         if (request.tableId() != null) {
-            RestaurantTable table = tableRepository.findById(request.tableId())
+            RestaurantTable table = tableRepository.findForUpdate(request.tableId())
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Table not found"));
             if (table.getStatus() != TableStatus.AVAILABLE) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Only available tables can start a new order");
@@ -78,24 +85,10 @@ public class OrderService {
         }
 
         BigDecimal total = BigDecimal.ZERO;
+        LocalDateTime addedAt = LocalDateTime.now();
         for (OrderItemRequest requestedItem : request.items()) {
-            MenuItem menuItem = menuItemRepository.findById(requestedItem.menuItemId())
-                    .orElseThrow(() -> new ResponseStatusException(
-                            HttpStatus.BAD_REQUEST, "A selected menu item no longer exists"));
-            if (!menuItem.isAvailable()) {
-                throw new ResponseStatusException(
-                        HttpStatus.BAD_REQUEST, menuItem.getName() + " is not available");
-            }
-
-            OrderLineItem line = new OrderLineItem();
-            line.setOrder(order);
-            line.setMenuItemId(menuItem.getId());
-            line.setItemName(menuItem.getName());
-            line.setUnitPrice(menuItem.getPrice());
-            line.setQuantity(requestedItem.quantity());
-            line.setLineTotal(menuItem.getPrice().multiply(BigDecimal.valueOf(requestedItem.quantity())));
-            total = total.add(line.getLineTotal());
-            order.getItems().add(line);
+            MenuItem menuItem = findAvailableMenuItem(requestedItem.menuItemId());
+            total = total.add(addLine(order, menuItem, requestedItem.quantity(), addedAt));
         }
 
         order.setTotal(total);
@@ -109,56 +102,66 @@ public class OrderService {
 
     @Transactional
     public OrderDto addItems(long id, OrderItemsRequest request, String actorUsername) {
-        CustomerOrder order = findById(id);
+        CustomerOrder order = findForUpdate(id);
         if (order.getRestaurantTable() == null || !isActive(order.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Items can only be added to an active table order");
         }
-        if (order.getCreatedBy() == null || !order.getCreatedBy().getUsername().equals(actorUsername)) {
+        if (!isAssignedTo(order, actorUsername)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can only add items to your own table orders");
         }
 
+        initializeItemStatuses(order);
+        LocalDateTime addedAt = LocalDateTime.now();
         BigDecimal addedTotal = BigDecimal.ZERO;
         for (OrderItemRequest requestedItem : request.items()) {
-            MenuItem menuItem = menuItemRepository.findById(requestedItem.menuItemId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "A selected menu item no longer exists"));
-            if (!menuItem.isAvailable()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, menuItem.getName() + " is not available");
-            }
-            OrderLineItem existing = order.getItems().stream()
-                    .filter(item -> menuItem.getId().equals(item.getMenuItemId()))
-                    .findFirst().orElse(null);
-            if (existing == null) {
-                existing = new OrderLineItem();
-                existing.setOrder(order);
-                existing.setMenuItemId(menuItem.getId());
-                existing.setItemName(menuItem.getName());
-                existing.setUnitPrice(menuItem.getPrice());
-                existing.setQuantity(0);
-                existing.setLineTotal(BigDecimal.ZERO);
-                order.getItems().add(existing);
-            }
-            existing.setQuantity(existing.getQuantity() + requestedItem.quantity());
-            existing.setLineTotal(existing.getUnitPrice().multiply(BigDecimal.valueOf(existing.getQuantity())));
-            addedTotal = addedTotal.add(menuItem.getPrice().multiply(BigDecimal.valueOf(requestedItem.quantity())));
+            MenuItem menuItem = findAvailableMenuItem(requestedItem.menuItemId());
+            addedTotal = addedTotal.add(addLine(order, menuItem, requestedItem.quantity(), addedAt));
         }
+
         order.setTotal(order.getTotal().add(addedTotal));
         order.setStatus(OrderStatus.NEW);
-        return toDto(orderRepository.save(order));
+        return toDto(orderRepository.saveAndFlush(order));
     }
 
     @Transactional
-    public OrderDto updateStatus(long id, OrderStatusRequest request) {
-        CustomerOrder order = findById(id);
-        if (!isAllowedTransition(order.getStatus(), request.status())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "Invalid order status transition from " + order.getStatus() + " to " + request.status());
+    public OrderDto updateItemStatus(long orderId, long itemId, OrderItemStatus next, String actorUsername) {
+        CustomerOrder order = findForUpdate(orderId);
+        boolean pickup = order.getRestaurantTable() == null && order.getTableNumber() == null;
+        if (next == OrderItemStatus.SERVED && !pickup && !isAssignedTo(order, actorUsername)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can only serve items at your assigned tables");
         }
-        order.setStatus(request.status());
-        if (request.status() == OrderStatus.COMPLETED && order.getRestaurantTable() != null) {
+        OrderLineItem item = order.getItems().stream()
+                .filter(line -> Long.valueOf(itemId).equals(line.getId()))
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order item not found"));
+
+        OrderItemStatus current = itemStatus(order, item);
+        if (current == next) {
+            return toDto(order);
+        }
+        boolean allowed = switch (current) {
+            case NEW -> next == OrderItemStatus.PREPARING;
+            case PREPARING -> next == OrderItemStatus.READY;
+            case READY -> next == OrderItemStatus.SERVED;
+            case SERVED -> false;
+        };
+        if (!allowed) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Invalid item status transition from " + current + " to " + next);
+        }
+
+        initializeItemStatuses(order);
+        item.setStatus(next);
+        // Enum order follows kitchen progress, so the least advanced item determines the order status.
+        OrderItemStatus earliest = order.getItems().stream()
+                .map(OrderLineItem::getStatus)
+                .min(OrderItemStatus::compareTo)
+                .orElseThrow();
+        order.setStatus(OrderStatus.valueOf(earliest.name()));
+        if (order.getStatus() == OrderStatus.SERVED && order.getRestaurantTable() != null) {
             order.getRestaurantTable().setStatus(TableStatus.AVAILABLE);
             tableRepository.save(order.getRestaurantTable());
         }
-        return toDto(orderRepository.save(order));
+        return toDto(order);
     }
 
     @Transactional(readOnly = true)
@@ -172,7 +175,7 @@ public class OrderService {
 
     @Transactional
     public void delete(long id) {
-        CustomerOrder order = findById(id);
+        CustomerOrder order = findForUpdate(id);
         if (order.getRestaurantTable() != null && isActive(order.getStatus())) {
             order.getRestaurantTable().setStatus(TableStatus.AVAILABLE);
             tableRepository.save(order.getRestaurantTable());
@@ -180,8 +183,8 @@ public class OrderService {
         orderRepository.delete(order);
     }
 
-    private CustomerOrder findById(long id) {
-        return orderRepository.findById(id)
+    private CustomerOrder findForUpdate(long id) {
+        return orderRepository.findForUpdate(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
     }
 
@@ -189,11 +192,43 @@ public class OrderService {
         return status == OrderStatus.NEW || status == OrderStatus.PREPARING || status == OrderStatus.READY;
     }
 
-    private boolean isAllowedTransition(OrderStatus current, OrderStatus next) {
-        if (current == next) return true;
-        return (current == OrderStatus.NEW && next == OrderStatus.PREPARING)
-                || (current == OrderStatus.PREPARING && next == OrderStatus.READY)
-                || (current == OrderStatus.READY && next == OrderStatus.COMPLETED);
+    private boolean isAssignedTo(CustomerOrder order, String username) {
+        return order.getCreatedBy() != null && order.getCreatedBy().getUsername().equals(username);
+    }
+
+    private MenuItem findAvailableMenuItem(long id) {
+        MenuItem item = menuItemRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "A selected menu item no longer exists"));
+        if (!item.isAvailable()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, item.getName() + " is not available");
+        }
+        return item;
+    }
+
+    private BigDecimal addLine(CustomerOrder order, MenuItem menuItem, int quantity, LocalDateTime addedAt) {
+        OrderLineItem line = new OrderLineItem();
+        line.setOrder(order);
+        line.setMenuItemId(menuItem.getId());
+        line.setItemName(menuItem.getName());
+        line.setUnitPrice(menuItem.getPrice());
+        line.setQuantity(quantity);
+        line.setLineTotal(menuItem.getPrice().multiply(BigDecimal.valueOf(quantity)));
+        line.setCreatedAt(addedAt);
+        line.setStatus(OrderItemStatus.NEW);
+        order.getItems().add(line);
+        return line.getLineTotal();
+    }
+
+    private OrderItemStatus itemStatus(CustomerOrder order, OrderLineItem item) {
+        return item.getStatus() == null ? OrderItemStatus.valueOf(order.getStatus().name()) : item.getStatus();
+    }
+
+    private void initializeItemStatuses(CustomerOrder order) {
+        for (OrderLineItem item : order.getItems()) {
+            if (item.getStatus() == null) {
+                item.setStatus(itemStatus(order, item));
+            }
+        }
     }
 
     private OrderDto toDto(CustomerOrder order) {
@@ -203,11 +238,14 @@ public class OrderService {
     private OrderDto toDto(CustomerOrder order, boolean includeTrackingCode) {
         List<OrderLineItemDto> items = order.getItems().stream()
                 .map(item -> new OrderLineItemDto(
+                        item.getId(),
                         item.getMenuItemId(),
                         item.getItemName(),
                         item.getUnitPrice(),
                         item.getQuantity(),
-                        item.getLineTotal()
+                        item.getLineTotal(),
+                        itemStatus(order, item),
+                        item.getCreatedAt() == null ? order.getCreatedAt() : item.getCreatedAt()
                 ))
                 .toList();
 

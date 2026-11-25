@@ -3,8 +3,7 @@ package com.restaurant.management.entity;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
+import jakarta.persistence.Convert;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -35,7 +34,7 @@ public class CustomerOrder {
     @Column(name = "customer_name", nullable = false, length = 120)
     private String customerName;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = OrderStatusConverter.class)
     @Column(nullable = false, length = 20)
     private OrderStatus status = OrderStatus.NEW;
 
